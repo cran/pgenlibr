@@ -35,14 +35,20 @@
 
 #include "plink2_string.h"
 #include "plink2_thread.h"
-#include "../libdeflate/libdeflate.h"
+#ifdef TRY_SYSTEM_LIBDEFLATE
+#  include <libdeflate.h>
+#else
+// Usually requires ../libdeflate to be in include path.
+#  include "libdeflate.h"
+#endif
 
 #ifdef __cplusplus
 namespace plink2 {
 #endif
 
 HEADER_INLINE int32_t IsBgzfHeader(const void* buf) {
-  const uint32_t magic4 = *S_CAST(const uint32_t*, buf);
+  uint32_t magic4;
+  memcpy(&magic4, buf, 4);
   return ((magic4 & 0x4ffffff) == 0x4088b1f) && memequal_k(&(S_CAST(const unsigned char*, buf)[10]), "\6\0BC\2", 6);
 }
 

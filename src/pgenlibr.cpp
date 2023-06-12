@@ -307,8 +307,13 @@ void RPgenReader::ReadIntHardcalls(IntegerVector buf, int variant_idx, int allel
     stop(errstr_buf);
   }
   if (buf.size() != _subset_size) {
+    using namespace plink2;
     char errstr_buf[256];
-    snprintf(errstr_buf, 256, "buf has wrong length (%" PRIdPTR "; %u expected)", buf.size(), _subset_size);
+    char* write_iter = strcpya_k(errstr_buf, "buf has wrong length (");
+    write_iter = wtoa(buf.size(), write_iter);
+    write_iter = strcpya_k(write_iter, "; ");
+    write_iter = u32toa(_subset_size, write_iter);
+    strcpy_k(write_iter, " expected)");
     stop(errstr_buf);
   }
   plink2::PglErr reterr = PgrGet1(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec);
@@ -332,8 +337,13 @@ void RPgenReader::ReadHardcalls(NumericVector buf, int variant_idx, int allele_i
     stop(errstr_buf);
   }
   if (buf.size() != _subset_size) {
+    using namespace plink2;
     char errstr_buf[256];
-    snprintf(errstr_buf, 256, "buf has wrong length (%" PRIdPTR "; %u expected)", buf.size(), _subset_size);
+    char* write_iter = strcpya_k(errstr_buf, "buf has wrong length (");
+    write_iter = wtoa(buf.size(), write_iter);
+    write_iter = strcpya_k(write_iter, "; ");
+    write_iter = u32toa(_subset_size, write_iter);
+    strcpy_k(write_iter, " expected)");
     stop(errstr_buf);
   }
   plink2::PglErr reterr = PgrGet1(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec);
@@ -355,8 +365,13 @@ void RPgenReader::Read(NumericVector buf, int variant_idx, int allele_idx) {
     stop(errstr_buf);
   }
   if (buf.size() != _subset_size) {
+    using namespace plink2;
     char errstr_buf[256];
-    snprintf(errstr_buf, 256, "buf has wrong length (%" PRIdPTR "; %u expected)", buf.size(), _subset_size);
+    char* write_iter = strcpya_k(errstr_buf, "buf has wrong length (");
+    write_iter = wtoa(buf.size(), write_iter);
+    write_iter = strcpya_k(write_iter, "; ");
+    write_iter = u32toa(_subset_size, write_iter);
+    strcpy_k(write_iter, " expected)");
     stop(errstr_buf);
   }
   uint32_t dosage_ct;
@@ -397,17 +412,17 @@ void RPgenReader::ReadAlleles(IntegerMatrix acbuf, Nullable<LogicalVector> phase
   uintptr_t sample_uidx_base = 0;
   uintptr_t cur_bits = phasepresent[0];
   if (!phasepresent_buf.isNotNull()) {
+    int32_t* allele_codes = &acbuf[0];
     if (cur_allele_ct == 2) {
-      uint64_t* allele_codes_alias64 = R_CAST(uint64_t*, &acbuf[0]);
+      const uint64_t one = 1;
       for (uint32_t phased_idx = 0; phased_idx != phasepresent_ct; ++phased_idx) {
         const uintptr_t sample_uidx = plink2::BitIter1(phasepresent, &sample_uidx_base, &cur_bits);
         if (plink2::IsSet(phaseinfo, sample_uidx)) {
           // 1|0
-          allele_codes_alias64[sample_uidx] = 1;
+          memcpy(&(allele_codes[2 * sample_uidx]), &one, sizeof(int64_t));
         }
       }
     } else {
-      int32_t* allele_codes = &acbuf[0];
       for (uint32_t phased_idx = 0; phased_idx != phasepresent_ct; ++phased_idx) {
         const uintptr_t sample_uidx = plink2::BitIter1(phasepresent, &sample_uidx_base, &cur_bits);
         if (plink2::IsSet(phaseinfo, sample_uidx)) {
@@ -429,17 +444,17 @@ void RPgenReader::ReadAlleles(IntegerMatrix acbuf, Nullable<LogicalVector> phase
   //      over phasepresent.
   int32_t* phasepresent_wbuf = &(as<LogicalVector>(phasepresent_buf)[0]);
   plink2::GenoarrLookup256x4bx4(_pgv.genovec, kGenoToLogicalPhaseQuads, _subset_size, phasepresent_wbuf);
+  int32_t* allele_codes = &acbuf[0];
   if (cur_allele_ct == 2) {
-    uint64_t* allele_codes_alias64 = R_CAST(uint64_t*, &acbuf[0]);
+    const uint64_t one = 1;
     for (uint32_t phased_idx = 0; phased_idx != phasepresent_ct; ++phased_idx) {
       const uintptr_t sample_uidx = plink2::BitIter1(phasepresent, &sample_uidx_base, &cur_bits);
       phasepresent_wbuf[sample_uidx] = 1;
       if (plink2::IsSet(phaseinfo, sample_uidx)) {
-        allele_codes_alias64[sample_uidx] = 1;
+        memcpy(&(allele_codes[2 * sample_uidx]), &one, sizeof(int64_t));
       }
     }
   } else {
-    int32_t* allele_codes = &acbuf[0];
     for (uint32_t phased_idx = 0; phased_idx != phasepresent_ct; ++phased_idx) {
       const uintptr_t sample_uidx = plink2::BitIter1(phasepresent, &sample_uidx_base, &cur_bits);
       phasepresent_wbuf[sample_uidx] = 1;
@@ -592,8 +607,13 @@ void RPgenReader::FillVariantScores(NumericVector result, NumericVector weights,
     stop("pgen is closed");
   }
   if (weights.size() != _subset_size) {
+    using namespace plink2;
     char errstr_buf[256];
-    snprintf(errstr_buf, 256, "weights.size()=%" PRIdPTR " doesn't match pgen sample-subset size=%d", weights.size(), _subset_size);
+    char* write_iter = strcpya_k(errstr_buf, "weights.size()=");
+    write_iter = wtoa(weights.size(), write_iter);
+    write_iter = strcpya_k(write_iter, " doesn't match pgen sample-subset size=");
+    write_iter = wtoa(_subset_size, write_iter);
+    *write_iter = '\0';
     stop(errstr_buf);
   }
   const int raw_variant_ct = _info_ptr->raw_variant_ct;
