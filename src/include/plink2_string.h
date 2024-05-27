@@ -1,7 +1,7 @@
 #ifndef __PLINK2_STRING_H__
 #define __PLINK2_STRING_H__
 
-// This library is part of PLINK 2.00, copyright (C) 2005-2023 Shaun Purcell,
+// This library is part of PLINK 2.00, copyright (C) 2005-2024 Shaun Purcell,
 // Christopher Chang.
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -144,10 +144,18 @@ namespace plink2 {
 #  define CXXCONST_CP const char*
 #  define CXXCONST_VOIDP const void*
 #  define TO_CONSTCPCONSTP(char_pp) (char_pp)
+
+HEADER_INLINE const char* DowncastToXC(const void* pp) {
+  return S_CAST(const char*, pp);
+}
 #else
 #  define CXXCONST_CP char*
 #  define CXXCONST_VOIDP void*
 #  define TO_CONSTCPCONSTP(char_pp) ((const char* const*)(char_pp))
+
+HEADER_INLINE char* DowncastToXC(const void* pp) {
+  return R_CAST(char*, pp);
+}
 #endif
 
 #ifdef _GNU_SOURCE
@@ -375,7 +383,8 @@ HEADER_INLINE int32_t memequal_sk(const void* s1, const char* k_s2) {
 }
 #endif
 
-// Must be safe to read first slen bytes of unknown_len_str.
+// Must be safe to read either first slen bytes of unknown_len_str, or at least
+// a cacheline past the first mismatch.
 // Note that it's better to call memequal(unknown_len_str, known_len_tok, slen
 // + 1) when known_len_tok is null-terminated.
 HEADER_INLINE int32_t strequal_unsafe(const char* unknown_len_str, const char* known_len_tok, uint32_t slen) {
@@ -1376,13 +1385,48 @@ HEADER_INLINE const char* CsvLexK(const char* str_iter, const uint32_t* col_type
 }
 #endif
 
+HEADER_INLINE uintptr_t CountByteInStr(const char* str_iter, char match) {
+  uintptr_t result = 0;
+  while (1) {
+    const char cc = *str_iter;
+    if (!cc) {
+      return result;
+    }
+    ++str_iter;
+    result += (cc == match);
+  }
+}
+
 // todo: movemask version of this
 uint32_t CountTokens(const char* str_iter);
 
 // uint32_t CommaOrSpaceCountTokens(const char* str_iter, uint32_t comma_delim);
 
+HEADER_INLINE uint32_t CountMultistr(const char* multistr) {
+  uint32_t ct = 0;
+  while (*multistr) {
+    multistr = strnul(multistr);
+    ++multistr;
+    ++ct;
+  }
+  return ct;
+}
+
 // empty multistr ok
 uint32_t CountAndMeasureMultistr(const char* multistr, uintptr_t* max_blen_ptr);
+
+// better than e.g. hash table if multistr usually contains only one entry
+// could benchmark against having precomputed strlen array
+HEADER_INLINE uint32_t InMultistr(const char* multistr, const char* query, uintptr_t query_slen) {
+  while (*multistr) {
+    const uintptr_t slen = strlen(multistr);
+    if ((slen == query_slen) && memequal(multistr, query, query_slen)) {
+      return 1;
+    }
+    multistr = &(multistr[slen + 1]);
+  }
+  return 0;
+}
 
 char* i32toa(int32_t ii, char* start);
 

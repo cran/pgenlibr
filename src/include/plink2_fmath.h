@@ -1,7 +1,7 @@
 #ifndef __PLINK2_FMATH_H__
 #define __PLINK2_FMATH_H__
 
-// This library is part of PLINK 2.00, copyright (C) 2005-2023 Shaun Purcell,
+// This library is part of PLINK 2.00, copyright (C) 2005-2024 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -40,7 +40,7 @@ extern const uint32_t kFloatExpLookupInt[] __attribute__((aligned(16)));
 
 #  ifdef FVEC_32
 HEADER_INLINE VecF fmath_exp_ps(VecF xxv) {
-  __m256 xx = R_CAST(__m256, xxv);
+  __m256 xx = FToVec(xxv);
   const __m256i mask7ff = _mm256_set1_epi32(0x7fffffff);
   // 88
   const __m256i max_x = _mm256_set1_epi32(0x42b00000);

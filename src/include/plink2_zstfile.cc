@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.00, copyright (C) 2005-2023 Shaun Purcell,
+// This library is part of PLINK 2.00, copyright (C) 2005-2024 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -137,7 +137,9 @@ int32_t zstread(zstRFILE* zrf_ptr, void* dst, uint32_t len) {
         zrfp->reterr = kPglRetEof;
         break;
       }
-      if (unlikely(!IsZstdFrame(*R_CAST(const uint32_t*, zrfp->zib.src)))) {
+      uint32_t magic4;
+      CopyFromUnalignedU32(&magic4, S_CAST(const unsigned char*, zrfp->zib.src));
+      if (unlikely(!IsZstdFrame(magic4))) {
         zrfp->reterr = kPglRetDecompressFail;
         zrfp->errmsg = kShortErrZstdPrefixUnknown;
         return -2;

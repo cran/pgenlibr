@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.00, copyright (C) 2005-2023 Shaun Purcell,
+// This library is part of PLINK 2.00, copyright (C) 2005-2024 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -336,22 +336,25 @@ THREAD_FUNC_DECL BgzfRawMtStreamThread(void* raw_arg) {
         in_size -= 25;
         uint32_t out_size;
         memcpy(&out_size, &(in[in_offset + in_size + 22]), 4);
-        const uint32_t out_offset_end = out_offset + out_size;
-        unsigned char* dst;
-        if (out_offset_end > out_capacity) {
-          dst = &(overflow[S_CAST(int32_t, out_offset - out_capacity)]);
-        } else {
-          dst = &(target[out_offset]);
-        }
-        if (unlikely(libdeflate_deflate_decompress(ldc, &(in[in_offset + 18]), in_size, dst, out_size, nullptr))) {
-          cwd->invalid_bgzf = 1;
-          break;
-        }
-        if ((out_offset_end > out_capacity) && (out_offset < out_capacity)) {
-          memcpy(&(target[out_offset]), dst, out_capacity - out_offset);
+        if (out_size) {
+          // avoid undefined behavior when target == nullptr
+          const uint32_t out_offset_end = out_offset + out_size;
+          unsigned char* dst;
+          if (out_offset_end > out_capacity) {
+            dst = &(overflow[S_CAST(int32_t, out_offset - out_capacity)]);
+          } else {
+            dst = &(target[out_offset]);
+          }
+          if (unlikely(libdeflate_deflate_decompress(ldc, &(in[in_offset + 18]), in_size, dst, out_size, nullptr))) {
+            cwd->invalid_bgzf = 1;
+            break;
+          }
+          if ((out_offset_end > out_capacity) && (out_offset < out_capacity)) {
+            memcpy(&(target[out_offset]), dst, out_capacity - out_offset);
+          }
+          out_offset = out_offset_end;
         }
         in_offset += in_size + 26;
-        out_offset = out_offset_end;
       }
       parity = 1 - parity;
     } while (!THREAD_BLOCK_FINISH(arg));
@@ -849,20 +852,21 @@ PglErr InitBgzfCompressStreamEx(const char* out_fname, uint32_t do_append, uint3
     return kPglRetThreadCreateFail;
   }
 #else
-  if (unlikely(pthread_create(&(bgzfp->threads[compressor_thread_ct]),
 #  ifdef __cplusplus
+  if (unlikely(pthread_create(&(bgzfp->threads[compressor_thread_ct]),
                               &g_thread_startup.smallstack_thread_attr,
-#  else
-                              &smallstack_thread_attr,
-#  endif
                               BgzfCompressWriterThread, bgzfp))) {
-#  ifndef __cplusplus
-    pthread_attr_destroy(&smallstack_thread_attr);
-#  endif
     bgzfp->unfinished_init_state = (kMaxBgzfSlotCt << 4) | compressor_thread_ct;
     return kPglRetThreadCreateFail;
   }
-#  if !defined(__cplusplus)
+#  else
+  if (unlikely(pthread_create(&(bgzfp->threads[compressor_thread_ct]),
+                              &smallstack_thread_attr,
+                              BgzfCompressWriterThread, bgzfp))) {
+    pthread_attr_destroy(&smallstack_thread_attr);
+    bgzfp->unfinished_init_state = (kMaxBgzfSlotCt << 4) | compressor_thread_ct;
+    return kPglRetThreadCreateFail;
+  }
   pthread_attr_destroy(&smallstack_thread_attr);
 #  endif
 #endif

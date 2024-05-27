@@ -1,7 +1,7 @@
 #ifndef __PLINK2_ZSTFILE_H__
 #define __PLINK2_ZSTFILE_H__
 
-// This library is part of PLINK 2.00, copyright (C) 2005-2023 Shaun Purcell,
+// This library is part of PLINK 2.00, copyright (C) 2005-2024 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -26,14 +26,13 @@
 
 #include "plink2_base.h"
 
-#ifdef TRY_SYSTEM_ZSTD
+#ifdef IGNORE_BUNDLED_ZSTD
 #  include <zstd.h>
 #  if !defined(ZSTD_VERSION_NUMBER) || (ZSTD_VERSION_NUMBER < 10404)
 #    error "plink2_zstfile requires zstd 1.4.4 or later."
 #  endif
 #else
-// Usually requires ../zstd/lib to be in include path.
-#  include "zstd.h"
+#  include "../zstd/lib/zstd.h"
 #endif
 
 #ifdef __cplusplus

@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.00, copyright (C) 2005-2023 Shaun Purcell,
+// This library is part of PLINK 2.00, copyright (C) 2005-2024 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -21,7 +21,7 @@
 namespace plink2 {
 #endif
 
-uintptr_t g_failed_alloc_attempt_size = 0;
+uint64_t g_failed_alloc_attempt_size = 0;
 
 #if (((__GNUC__ == 4) && (__GNUC_MINOR__ < 7)) || (__GNUC__ >= 11)) && !defined(__APPLE__)
 BoolErr pgl_malloc(uintptr_t size, void* pp) {
@@ -181,7 +181,7 @@ BoolErr ScanIntAbsBounded(const char* str_iter, uint64_t bound, int32_t* valp) {
       return 1;
     }
   }
-  if (unlikely(ScanUintCappedFinish(str_iter, bound, R_CAST(uint32_t*, valp)))) {
+  if (unlikely(ScanUintCappedFinish(str_iter, bound, I32ToU32(valp)))) {
     return 1;
   }
   *valp *= sign;
@@ -297,7 +297,7 @@ BoolErr aligned_malloc(uintptr_t size, uintptr_t alignment, void* aligned_pp) {
   return 0;
 }
 
-#if defined(__LP64__) && !defined(NO_UNALIGNED)
+#if defined(USE_SSE2) && !defined(NO_UNALIGNED)
 int32_t memequal(const void* m1, const void* m2, uintptr_t byte_ct) {
   const unsigned char* m1_uc = S_CAST(const unsigned char*, m1);
   const unsigned char* m2_uc = S_CAST(const unsigned char*, m2);
@@ -472,7 +472,7 @@ int32_t Memcmp(const void* m1, const void* m2, uintptr_t byte_ct) {
   }
   return 0;
 }
-#endif // defined(__LP64__) && !defined(NO_UNALIGNED)
+#endif // defined(USE_SSE2) && !defined(NO_UNALIGNED)
 
 const uint16_t kDigitPair[] = {
   0x3030, 0x3130, 0x3230, 0x3330, 0x3430, 0x3530, 0x3630, 0x3730, 0x3830, 0x3930,
@@ -659,8 +659,8 @@ uintptr_t FirstUnequalW(const void* arr1, const void* arr2, uintptr_t nbytes) {
   for (uintptr_t widx = 0; widx != word_ct; ++widx) {
     uintptr_t arr1_word;
     uintptr_t arr2_word;
-    UnalignedCopyOffsetW(&arr1_word, arr1b, widx);
-    UnalignedCopyOffsetW(&arr2_word, arr2b, widx);
+    CopyFromUnalignedOffsetW(&arr1_word, arr1b, widx);
+    CopyFromUnalignedOffsetW(&arr2_word, arr2b, widx);
     const uintptr_t xor_result = arr1_word ^ arr2_word;
     if (xor_result) {
       return widx * kBytesPerWord + ctzw(xor_result) / CHAR_BIT;
@@ -670,14 +670,45 @@ uintptr_t FirstUnequalW(const void* arr1, const void* arr2, uintptr_t nbytes) {
     const uintptr_t final_offset = nbytes - kBytesPerWord;
     uintptr_t arr1_word;
     uintptr_t arr2_word;
-    memcpy(&arr1_word, &(arr1b[final_offset]), kBytesPerWord);
-    memcpy(&arr2_word, &(arr2b[final_offset]), kBytesPerWord);
+    CopyFromUnalignedW(&arr1_word, &(arr1b[final_offset]));
+    CopyFromUnalignedW(&arr2_word, &(arr2b[final_offset]));
     const uintptr_t xor_result = arr1_word ^ arr2_word;
     if (xor_result) {
       return final_offset + ctzw(xor_result) / CHAR_BIT;
     }
   }
   return nbytes;
+}
+#endif
+
+#ifdef __LP64__
+uintptr_t CountVintsNonempty(const unsigned char* buf, const unsigned char* buf_end) {
+  const uintptr_t starting_addr = R_CAST(uintptr_t, buf);
+  const VecUc* buf_viter = R_CAST(const VecUc*, RoundDownPow2(starting_addr, kBytesPerVec));
+  const uintptr_t ending_addr = R_CAST(uintptr_t, buf_end);
+  const VecUc* buf_vlast = R_CAST(const VecUc*, RoundDownPow2(ending_addr - 1, kBytesPerVec));
+  const uint32_t leading_byte_ct = starting_addr - R_CAST(uintptr_t, buf_viter);
+  Vec8thUint vint_ends = (UINT32_MAX << leading_byte_ct) & (~vecuc_movemask(*buf_viter));
+  uintptr_t total = 0;
+  while (buf_viter != buf_vlast) {
+    total += PopcountVec8thUint(vint_ends);
+    ++buf_viter;
+    vint_ends = ~vecuc_movemask(*buf_viter);
+  }
+  const uint32_t trailing_byte_ct = ending_addr - R_CAST(uintptr_t, buf_vlast);
+  vint_ends &= (k1LU << trailing_byte_ct) - 1;
+  total += PopcountVec8thUint(vint_ends);
+  return total;
+}
+#else
+uintptr_t CountVints(const unsigned char* buf, const unsigned char* buf_end) {
+  // Could check one word at a time.
+  const uintptr_t len = buf_end - buf;
+  uintptr_t inv_result = 0;
+  for (uintptr_t ulii = 0; ulii != len; ++ulii) {
+    inv_result += buf[ulii] >> 7;
+  }
+  return len - inv_result;
 }
 #endif
 

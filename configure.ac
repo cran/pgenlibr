@@ -2,7 +2,7 @@
 # https://github.com/ropensci/git2r/blob/master/configure.ac .
 
 AC_PREREQ([2.69])
-AC_INIT([pgenlibr],[0.3.5],[chrchang@alumni.caltech.edu])
+AC_INIT([pgenlibr],[0.3.6],[chrchang@alumni.caltech.edu])
 AC_PATH_PROG([PKGCONF],[pkg-config],[],[$PATH:/usr/local/bin:ext/bin:ext:/sw/bin:/opt/bin:/opt/local/bin])
 
 # Find the compiler and compiler flags to use for fallback version checks
@@ -60,7 +60,7 @@ ZSTD_LIBS=""
 ZSTD_SHLIB=""
 ZSTD_CLEAN=""
 COMPILE_ZSTD=""
-LIBDEFLATE_INCLUDE_FLAG=""
+LIBDEFLATE_COMPILE_FLAG=""
 LIBDEFLATE_INCLUDE_PATH=""
 LIBDEFLATE_LIBS=""
 LIBDEFLATE_SHLIB=""
@@ -81,10 +81,11 @@ else
       VERSION_STRING=`${PKGCONF} --modversion libzstd`
       VER=`getVersion3 ${VERSION_STRING}`
       # The bundled 1.5.5 includes a compression bugfix, but the Python/R
-      # interfaces only use zstd for decompression, so we don't need it.
-      # The release notes for 1.5.4 mention 32-bit bugfixes, so we'd like to
-      # require it in 2024.
-      if test "${VER}" -ge 100502; then
+      # interfaces currently only use zstd for decompression, so we don't need
+      # it.
+      # 1.5.4 is over a year old, and its release notes mention 32-bit
+      # bugfixes, so we now require it.
+      if test "${VER}" -ge 100504; then
         AC_MSG_NOTICE([zstd ${VERSION_STRING} library detected -- skipping zstd compilation])
         ZSTD_INCLUDE_PATH=`"${PKGCONF}" --cflags-only-I libzstd`
         ZSTD_LIBS=`"${PKGCONF}" --libs libzstd`
@@ -101,7 +102,6 @@ else
     ${PATH_TO_CPP_COMPILER} ${CPPFLAGS} ${CXXFLAGS} -E tools/zstd_version.cpp >/dev/null 2>&1 && zstd_ver_ok=yes
     AC_MSG_RESULT([${zstd_ver_ok}])
     if test "xx${zstd_ver_ok}" == "xxyes"; then
-      ZSTD_COMPILE_FLAG="-DTRY_SYSTEM_ZSTD"
       ZSTD_LIBS="-lzstd"
       COMPILE_ZSTD="false"
     else
@@ -110,12 +110,14 @@ else
   fi
 fi
 
-if test xx$COMPILE_ZSTD = "xxtrue"; then
+if test xx$COMPILE_ZSTD == "xxtrue"; then
   ZSTD_COMPILE_FLAG="-DZSTD_DISABLE_ASM"
   ZSTD_INCLUDE_PATH="-Izstd/lib -Izstd/lib/common"
   ZSTD_LIBS="${LIBS} -lPGZSTD"
   ZSTD_SHLIB="libPGZSTD.a"
   ZSTD_CLEAN="\$(LIBZSTD) libPGZSTD.a"
+else
+  ZSTD_COMPILE_FLAG="-DIGNORE_BUNDLED_ZSTD"
 fi
 
 if test "xx$libdeflate_include_path" != "xx"; then
@@ -128,9 +130,12 @@ else
     if "${PKGCONF}" --exists libdeflate; then
       VERSION_STRING=`${PKGCONF} --modversion libdeflate`
       VER=`getVersion2 ${VERSION_STRING}`
-      # 1.14 has significant performance improvements, so we'd like to require
-      # it in 2024.
-      if test "${VER}" -ge 1009; then
+      # 1.14 is over a year old, and includes significant performance
+      # improvements.
+      # Don't see anything important in subsequent versions.  1.20 breaks
+      # compatibility with gcc <4.9, which I'm still using for 32-bit plink2
+      # builds, so bundled version is likely to remain 1.19 for a long time.
+      if test "${VER}" -ge 1014; then
         AC_MSG_NOTICE([libdeflate ${VERSION_STRING} library detected -- skipping libdeflate compilation])
         LIBDEFLATE_INCLUDE_PATH=`"${PKGCONF}" --cflags-only-I libdeflate`
         LIBDEFLATE_LIBS=`"${PKGCONF}" --libs libdeflate`
@@ -147,7 +152,6 @@ else
     ${PATH_TO_CPP_COMPILER} ${CPPFLAGS} ${CXXFLAGS} -E tools/libdeflate_version.cpp >/dev/null 2>&1 && libdeflate_ver_ok=yes
     AC_MSG_RESULT([${libdeflate_ver_ok}])
     if test "xx${libdeflate_ver_ok}" == "xxyes"; then
-      LIBDEFLATE_COMPILE_FLAG="-DTRY_SYSTEM_LIBDEFLATE"
       LIBDEFLATE_LIBS="-ldeflate"
       COMPILE_LIBDEFLATE="false"
     else
@@ -156,22 +160,25 @@ else
   fi
 fi
 
-if test xx$COMPILE_LIBDEFLATE = "xxtrue"; then
+if test xx$COMPILE_LIBDEFLATE == "xxtrue"; then
   LIBDEFLATE_INCLUDE_PATH="-Ilibdeflate"
   LIBDEFLATE_LIBS="${LIBS} -lPGDEFLATE"
   LIBDEFLATE_SHLIB="libPGDEFLATE.a"
   LIBDEFLATE_CLEAN="\$(LIBDEFLATE) libPGDEFLATE.a"
+else
+  LIBDEFLATE_COMPILE_FLAG="-DIGNORE_BUNDLED_LIBDEFLATE"
 fi
 
 if test "xx$simde_include_path" != "xx"; then
   AC_MSG_NOTICE([Using user-defined simde install paths])
-    SIMDE_INCLUDE_PATH="-I${simde_include_path}"
-    USE_BUNDLED_SIMDE="false"
+  SIMDE_INCLUDE_PATH="-I${simde_include_path}"
+  USE_BUNDLED_SIMDE="false"
 else
   if test "xx$PKGCONF" != "xx"; then
     if "${PKGCONF}" --exists simde; then
       VERSION_STRING=`${PKGCONF} --modversion simde`
       VER=`getVersion3 ${VERSION_STRING}`
+      # TODO: verify v0.8.x doesn't break anything.
       if test "${VER}" -ge 702; then
         AC_MSG_NOTICE([simde ${VERSION_STRING} library detected -- ignoring bundled simde header files])
         SIMDE_INCLUDE_PATH=`"${PKGCONF}" --cflags-only-I simde`
@@ -188,13 +195,17 @@ else
     ${PATH_TO_CPP_COMPILER} ${CPPFLAGS} ${CXXFLAGS} -E tools/simde_version.cpp >/dev/null 2>&1 && simde_ver_ok=yes
     AC_MSG_RESULT([${simde_ver_ok}])
     if test "xx${simde_ver_ok}" == "xxyes"; then
-      SIMDE_COMPILE_FLAG="-DTRY_SYSTEM_SIMDE"
       USE_BUNDLED_SIMDE="false"
     else
       USE_BUNDLED_SIMDE="true"
     fi
   fi
 fi
+
+if test xx$USE_BUNDLED_SIMDE != "xxtrue"; then
+  SIMDE_COMPILE_FLAG="-DIGNORE_BUNDLED_SIMDE"
+fi
+
 
 AC_SUBST([ZSTD_COMPILE_FLAG], $ZSTD_COMPILE_FLAG)
 AC_SUBST([ZSTD_INCLUDE_PATH], $ZSTD_INCLUDE_PATH)

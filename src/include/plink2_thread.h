@@ -1,7 +1,7 @@
 #ifndef __PLINK2_THREAD_H__
 #define __PLINK2_THREAD_H__
 
-// This library is part of PLINK 2.00, copyright (C) 2005-2023 Shaun Purcell,
+// This library is part of PLINK 2.00, copyright (C) 2005-2024 Shaun Purcell,
 // Christopher Chang.
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -20,6 +20,13 @@
 
 // Basic multithreading code.  Uses native Win32 API instead of pthreads
 // emulation on Windows.
+// Probable todo: decent scheduling.  plink2_bgzf currently has bespoke
+// sequential-scheduling logic that's more efficient than what the rest of
+// plink2 is doing; that's probably worth generalizing.  In the non-sequential
+// case (where e.g. an entire block of 2^16 variants is processed at once, and
+// beyond some locality-associated efficiency benefits it doesn't matter what
+// order the variants within the block are handled in), work-stealing or
+// something with a similar effect should be implemented.
 #include "plink2_base.h"
 
 #ifdef _WIN32
