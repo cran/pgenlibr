@@ -1,14 +1,14 @@
-6a1b403ac8a15ae82ec20c37cae96766 *DESCRIPTION
+3c483bc9fe72313cb8c6a68d50061df5 *DESCRIPTION
 8af7c8403cc92c8253647f1147c31e8b *LICENSE.note
 b203cde2f75cc86ca87d07e0d4eac351 *NAMESPACE
-8451f0535b5d1d3746f23c06dcce1a21 *NEWS.md
+265dbcc76bb63f2d7edc61377dfc2155 *NEWS.md
 4afc5a40e800e7181e141938d9bc3f80 *R/RcppExports.R
 8214a76a76c4ec803f37f4c2d161f27b *R/zzz.R
 c3ce3b9861d9c4a20f77921f64b60ec9 *README.md
 f61db891eb928123aba4412ca322f508 *build/partial.rdb
 e89fc408b56f2b84fa5c0236006e0da3 *cleanup
 4e1ae0f1ac407fec91df3d0d16e0f73a *configure
-cd4b42f73cd240e51c400882ff24ec01 *configure.ac
+044cf3f30584da6a8669c0f417e0daa9 *configure.ac
 a95479855985b7b380088996761df108 *inst/extdata/chr21_phase3_start.pgen
 1b13baa92c7d956083ced07db1759bc8 *inst/extdata/chr21_phase3_start.psam
 d7781c56ab72f5a1dfa3f65d20875c88 *inst/extdata/chr21_phase3_start.pvar.zst
@@ -38,7 +38,7 @@ f7c747ca420964bc3545bf413429a81e *man/VariantScores.Rd
 3fde53bf09dea8ac0b42c16c27eb1c8c *man/pgenlibr-package.Rd
 49898c3aa5297c7b93d49579021bf3df *src/Makevars.in
 2cec33791efd347cbcb051402d7cf9c4 *src/Makevars.ucrt
-68366503c161a14d6e85763caab0e314 *src/Makevars.win
+572ebb7f175e62add207810284e7125a *src/Makevars.win
 1a8fb0acc12df5e0043a6ab0389da1d4 *src/RcppExports.cpp
 0f950a8d9d1e7cd751bd7db99196ef71 *src/include/SFMT.c
 aeed965e89fd67e56ef8daf661fac7e2 *src/include/SFMT.h
