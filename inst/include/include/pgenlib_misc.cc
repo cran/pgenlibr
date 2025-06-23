@@ -14,8 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-
 #include "pgenlib_misc.h"
+
+#include <limits.h>
 
 #ifdef __cplusplus
 namespace plink2 {
@@ -1250,6 +1251,7 @@ void TransposeNypblock64(const uintptr_t* read_iter, uint32_t read_ul_stride, ui
       // and target_4567 to
       //   _ (4, 0) _ (5, 0) _ (6, 0) _ (7, 0) _ (4, 1) _ (5, 1) _ (6, 1) ...
       // This is perfectly arranged for movemask.
+      // todo: better ARM implementation
       VecW target_4567 = vecw_blendv(loader, vecw_srli(loader, 7), m8);
       target_iter7[vidx] = vecw_movemask(target_4567);
       target_4567 = vecw_slli(target_4567, 2);

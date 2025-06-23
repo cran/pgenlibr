@@ -148,6 +148,33 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// HasSparseHardcalls
+bool HasSparseHardcalls(List pgen, int variant_num, int allele_num);
+RcppExport SEXP _pgenlibr_HasSparseHardcalls(SEXP pgenSEXP, SEXP variant_numSEXP, SEXP allele_numSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type pgen(pgenSEXP);
+    Rcpp::traits::input_parameter< int >::type variant_num(variant_numSEXP);
+    Rcpp::traits::input_parameter< int >::type allele_num(allele_numSEXP);
+    rcpp_result_gen = Rcpp::wrap(HasSparseHardcalls(pgen, variant_num, allele_num));
+    return rcpp_result_gen;
+END_RCPP
+}
+// ReadSparseHardcalls
+List ReadSparseHardcalls(List pgen, int variant_num, int allele_num, bool return_ints);
+RcppExport SEXP _pgenlibr_ReadSparseHardcalls(SEXP pgenSEXP, SEXP variant_numSEXP, SEXP allele_numSEXP, SEXP return_intsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type pgen(pgenSEXP);
+    Rcpp::traits::input_parameter< int >::type variant_num(variant_numSEXP);
+    Rcpp::traits::input_parameter< int >::type allele_num(allele_numSEXP);
+    Rcpp::traits::input_parameter< bool >::type return_ints(return_intsSEXP);
+    rcpp_result_gen = Rcpp::wrap(ReadSparseHardcalls(pgen, variant_num, allele_num, return_ints));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Read
 void Read(List pgen, NumericVector buf, int variant_num, int allele_num);
 RcppExport SEXP _pgenlibr_Read(SEXP pgenSEXP, SEXP bufSEXP, SEXP variant_numSEXP, SEXP allele_numSEXP) {
@@ -159,6 +186,32 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type allele_num(allele_numSEXP);
     Read(pgen, buf, variant_num, allele_num);
     return R_NilValue;
+END_RCPP
+}
+// HasSparse
+bool HasSparse(List pgen, int variant_num, int allele_num);
+RcppExport SEXP _pgenlibr_HasSparse(SEXP pgenSEXP, SEXP variant_numSEXP, SEXP allele_numSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type pgen(pgenSEXP);
+    Rcpp::traits::input_parameter< int >::type variant_num(variant_numSEXP);
+    Rcpp::traits::input_parameter< int >::type allele_num(allele_numSEXP);
+    rcpp_result_gen = Rcpp::wrap(HasSparse(pgen, variant_num, allele_num));
+    return rcpp_result_gen;
+END_RCPP
+}
+// ReadSparse
+List ReadSparse(List pgen, int variant_num, int allele_num);
+RcppExport SEXP _pgenlibr_ReadSparse(SEXP pgenSEXP, SEXP variant_numSEXP, SEXP allele_numSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type pgen(pgenSEXP);
+    Rcpp::traits::input_parameter< int >::type variant_num(variant_numSEXP);
+    Rcpp::traits::input_parameter< int >::type allele_num(allele_numSEXP);
+    rcpp_result_gen = Rcpp::wrap(ReadSparse(pgen, variant_num, allele_num));
+    return rcpp_result_gen;
 END_RCPP
 }
 // ReadAlleles
@@ -320,7 +373,11 @@ static const R_CallMethodDef CallEntries[] = {
     {"_pgenlibr_IntAlleleCodeBuf", (DL_FUNC) &_pgenlibr_IntAlleleCodeBuf, 1},
     {"_pgenlibr_BoolBuf", (DL_FUNC) &_pgenlibr_BoolBuf, 1},
     {"_pgenlibr_ReadHardcalls", (DL_FUNC) &_pgenlibr_ReadHardcalls, 4},
+    {"_pgenlibr_HasSparseHardcalls", (DL_FUNC) &_pgenlibr_HasSparseHardcalls, 3},
+    {"_pgenlibr_ReadSparseHardcalls", (DL_FUNC) &_pgenlibr_ReadSparseHardcalls, 4},
     {"_pgenlibr_Read", (DL_FUNC) &_pgenlibr_Read, 4},
+    {"_pgenlibr_HasSparse", (DL_FUNC) &_pgenlibr_HasSparse, 3},
+    {"_pgenlibr_ReadSparse", (DL_FUNC) &_pgenlibr_ReadSparse, 3},
     {"_pgenlibr_ReadAlleles", (DL_FUNC) &_pgenlibr_ReadAlleles, 4},
     {"_pgenlibr_ReadIntList", (DL_FUNC) &_pgenlibr_ReadIntList, 2},
     {"_pgenlibr_ReadList", (DL_FUNC) &_pgenlibr_ReadList, 3},

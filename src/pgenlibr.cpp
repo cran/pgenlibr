@@ -4,7 +4,8 @@
 
 class RPgenReader {
 public:
-  // imitates Python/pgenlib.pyx
+  // similar to Python/pgenlib.pyx ; has a bit more functionality as of Feb
+  // 2025
   RPgenReader();
 
 #if __cplusplus >= 201103L
@@ -25,13 +26,21 @@ public:
 
   uint32_t GetMaxAlleleCt() const;
 
+  uint32_t GetVrtype(uint32_t variant_idx) const;
+
   bool HardcallPhasePresent() const;
 
   void ReadIntHardcalls(IntegerVector buf, int variant_idx, int allele_idx);
 
   void ReadHardcalls(NumericVector buf, int variant_idx, int allele_idx);
 
+  void ReadIntMaybeSparseHardcalls(IntegerVector buf, int variant_idx, int allele_idx, int max_difflist_len, IntegerVector* sample_nums_ptr, IntegerVector* allele_counts_ptr);
+
+  void ReadMaybeSparseHardcalls(NumericVector buf, int variant_idx, int allele_idx, int max_difflist_len, IntegerVector* sample_nums_ptr, NumericVector* allele_dosages_ptr);
+
   void Read(NumericVector buf, int variant_idx, int allele_idx);
+
+  void ReadMaybeSparse(NumericVector buf, int variant_idx, int allele_idx, int max_difflist_len, IntegerVector* sample_nums_ptr, NumericVector* allele_dosages_ptr);
 
   void ReadAlleles(IntegerMatrix acbuf,
                    Nullable<LogicalVector> phasepresent_buf, int variant_idx);
@@ -63,6 +72,9 @@ private:
 
   plink2::PgenVariant _pgv;
 
+  uintptr_t* _raregeno_buf;
+  uint32_t* _difflist_sample_ids_buf;
+
   plink2::VecW* _transpose_batch_buf;
   // kPglNypTransposeBatch (= 256) variants at a time, and then transpose
   uintptr_t* _multivar_vmaj_geno_buf;
@@ -73,6 +85,8 @@ private:
   uintptr_t* _multivar_smaj_phasepresent_batch_buf;
 
   void SetSampleSubsetInternal(IntegerVector sample_subset_1based);
+
+  void ReadMaybeSparseHardcallsInternal(int variant_idx, int max_simple_difflist_len, uint32_t* difflist_common_geno_ptr, uint32_t* difflist_len_ptr);
 
   void ReadAllelesPhasedInternal(int variant_idx);
 };
@@ -103,7 +117,7 @@ void RPgenReader::Load(String filename, Nullable<List> pvar,
   plink2::PgenHeaderCtrl header_ctrl;
   uintptr_t pgfi_alloc_cacheline_ct;
   char errstr_buf[plink2::kPglErrstrBufBlen];
-  if (PgfiInitPhase1(fname, nullptr, cur_variant_ct, cur_sample_ct, &header_ctrl, _info_ptr, &pgfi_alloc_cacheline_ct, errstr_buf) != plink2::kPglRetSuccess) {
+  if (plink2::PgfiInitPhase1(fname, nullptr, cur_variant_ct, cur_sample_ct, &header_ctrl, _info_ptr, &pgfi_alloc_cacheline_ct, errstr_buf) != plink2::kPglRetSuccess) {
     stop(&(errstr_buf[7]));
   }
   const uint32_t raw_variant_ct = _info_ptr->raw_variant_ct;
@@ -145,7 +159,7 @@ void RPgenReader::Load(String filename, Nullable<List> pvar,
   }
   uint32_t max_vrec_width;
   uintptr_t pgr_alloc_cacheline_ct;
-  if (PgfiInitPhase2(header_ctrl, 1, 0, 0, 0, raw_variant_ct, &max_vrec_width, _info_ptr, pgfi_alloc, &pgr_alloc_cacheline_ct, errstr_buf)) {
+  if (plink2::PgfiInitPhase2(header_ctrl, 1, 0, 0, 0, raw_variant_ct, &max_vrec_width, _info_ptr, pgfi_alloc, &pgr_alloc_cacheline_ct, errstr_buf)) {
     if (pgfi_alloc && (!_info_ptr->vrtypes)) {
       plink2::aligned_free(pgfi_alloc);
     }
@@ -168,6 +182,14 @@ void RPgenReader::Load(String filename, Nullable<List> pvar,
   const uintptr_t sample_subset_byte_ct = plink2::DivUp(file_sample_ct, plink2::kBitsPerVec) * plink2::kBytesPerVec;
   const uintptr_t cumulative_popcounts_byte_ct = plink2::DivUp(file_sample_ct, plink2::kBitsPerWord * plink2::kInt32PerVec) * plink2::kBytesPerVec;
   const uintptr_t genovec_byte_ct = plink2::DivUp(file_sample_ct, plink2::kNypsPerVec) * plink2::kBytesPerVec;
+  const uint32_t is_not_plink1_bed = (_info_ptr->vrtypes != nullptr);
+  uintptr_t raregeno_byte_ct = 0;
+  uintptr_t difflist_sample_ids_byte_ct = 0;
+  if (is_not_plink1_bed) {
+    const uint32_t max_stored_single_difflist_len = file_sample_ct / plink2::kPglMaxDifflistLenDivisor;
+    raregeno_byte_ct = plink2::DivUp(2 * max_stored_single_difflist_len, plink2::kNypsPerVec) * plink2::kBytesPerVec;
+    difflist_sample_ids_byte_ct = plink2::RoundUpPow2(3 * max_stored_single_difflist_len * sizeof(int32_t), plink2::kBytesPerVec);
+  }
   const uintptr_t ac_byte_ct = plink2::RoundUpPow2(file_sample_ct * sizeof(plink2::AlleleCode), plink2::kBytesPerVec);
   const uintptr_t ac2_byte_ct = plink2::RoundUpPow2(file_sample_ct * 2 * sizeof(plink2::AlleleCode), plink2::kBytesPerVec);
   uintptr_t multiallelic_hc_byte_ct = 0;
@@ -176,10 +198,10 @@ void RPgenReader::Load(String filename, Nullable<List> pvar,
   }
   const uintptr_t dosage_main_byte_ct = plink2::DivUp(file_sample_ct, (2 * plink2::kInt32PerVec)) * plink2::kBytesPerVec;
   unsigned char* pgr_alloc;
-  if (plink2::cachealigned_malloc(pgr_alloc_main_byte_ct + (2 * plink2::kPglNypTransposeBatch + 5) * sample_subset_byte_ct + cumulative_popcounts_byte_ct + (1 + plink2::kPglNypTransposeBatch) * genovec_byte_ct + multiallelic_hc_byte_ct + dosage_main_byte_ct + plink2::kPglBitTransposeBufbytes + 4 * (plink2::kPglNypTransposeBatch * plink2::kPglNypTransposeBatch / 8), &pgr_alloc)) {
+  if (plink2::cachealigned_malloc(pgr_alloc_main_byte_ct + (2 * plink2::kPglNypTransposeBatch + 5) * sample_subset_byte_ct + cumulative_popcounts_byte_ct + (1 + plink2::kPglNypTransposeBatch) * genovec_byte_ct + raregeno_byte_ct + difflist_sample_ids_byte_ct + multiallelic_hc_byte_ct + dosage_main_byte_ct + plink2::kPglBitTransposeBufbytes + 4 * (plink2::kPglNypTransposeBatch * plink2::kPglNypTransposeBatch / 8), &pgr_alloc)) {
     stop("Out of memory");
   }
-  plink2::PglErr reterr = PgrInit(fname, max_vrec_width, _info_ptr, _state_ptr, pgr_alloc);
+  plink2::PglErr reterr = plink2::PgrInit(fname, max_vrec_width, _info_ptr, _state_ptr, pgr_alloc);
   if (reterr != plink2::kPglRetSuccess) {
     if (!plink2::PgrGetFreadBuf(_state_ptr)) {
       plink2::aligned_free(pgr_alloc);
@@ -203,6 +225,15 @@ void RPgenReader::Load(String filename, Nullable<List> pvar,
   pgr_alloc_iter = &(pgr_alloc_iter[cumulative_popcounts_byte_ct]);
   _pgv.genovec = reinterpret_cast<uintptr_t*>(pgr_alloc_iter);
   pgr_alloc_iter = &(pgr_alloc_iter[genovec_byte_ct]);
+  if (is_not_plink1_bed) {
+    _raregeno_buf = reinterpret_cast<uintptr_t*>(pgr_alloc_iter);
+    pgr_alloc_iter = &(pgr_alloc_iter[raregeno_byte_ct]);
+    _difflist_sample_ids_buf = reinterpret_cast<uint32_t*>(pgr_alloc_iter);
+    pgr_alloc_iter = &(pgr_alloc_iter[difflist_sample_ids_byte_ct]);
+  } else {
+    _raregeno_buf = nullptr;
+    _difflist_sample_ids_buf = nullptr;
+  }
   if (multiallelic_hc_byte_ct) {
     _pgv.patch_01_set = reinterpret_cast<uintptr_t*>(pgr_alloc_iter);
     pgr_alloc_iter = &(pgr_alloc_iter[sample_subset_byte_ct]);
@@ -288,6 +319,18 @@ uint32_t RPgenReader::GetMaxAlleleCt() const {
   return _info_ptr->max_allele_ct;
 }
 
+uint32_t RPgenReader::GetVrtype(uint32_t variant_idx) const {
+  if (!_info_ptr) {
+    stop("pgen is closed");
+  }
+  if (variant_idx >= _info_ptr->raw_variant_ct) {
+    char errstr_buf[256];
+    snprintf(errstr_buf, 256, "variant_num out of range (%d; must be 1..%u)", variant_idx + 1, _info_ptr->raw_variant_ct);
+    stop(errstr_buf);
+  }
+  return plink2::PgrGetVrtype(_state_ptr, variant_idx);
+}
+
 bool RPgenReader::HardcallPhasePresent() const {
   if (!_info_ptr) {
     stop("pgen is closed");
@@ -316,7 +359,7 @@ void RPgenReader::ReadIntHardcalls(IntegerVector buf, int variant_idx, int allel
     strcpy_k(write_iter, " expected)");
     stop(errstr_buf);
   }
-  plink2::PglErr reterr = PgrGet1(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec);
+  plink2::PglErr reterr = plink2::PgrGet1(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec);
   if (reterr != plink2::kPglRetSuccess) {
     char errstr_buf[256];
     snprintf(errstr_buf, 256, "PgrGet1() error %d", static_cast<int>(reterr));
@@ -346,13 +389,91 @@ void RPgenReader::ReadHardcalls(NumericVector buf, int variant_idx, int allele_i
     strcpy_k(write_iter, " expected)");
     stop(errstr_buf);
   }
-  plink2::PglErr reterr = PgrGet1(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec);
+  plink2::PglErr reterr = plink2::PgrGet1(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec);
   if (reterr != plink2::kPglRetSuccess) {
     char errstr_buf[256];
     snprintf(errstr_buf, 256, "PgrGet1() error %d", static_cast<int>(reterr));
     stop(errstr_buf);
   }
   plink2::GenoarrLookup16x8bx2(_pgv.genovec, kGenoRDoublePairs, _subset_size, &buf[0]);
+}
+
+static const int32_t kGenoRInt32QuadsFlipped[1024] ALIGNV16 = QUAD_TABLE256(2, 1, 0, NA_INTEGER);
+
+void RPgenReader::ReadIntMaybeSparseHardcalls(IntegerVector buf, int variant_idx, int allele_idx, int max_difflist_len, IntegerVector* sample_nums_ptr, IntegerVector* allele_counts_ptr) {
+  uint32_t difflist_common_geno;
+  uint32_t difflist_len;
+  ReadMaybeSparseHardcallsInternal(variant_idx, max_difflist_len, &difflist_common_geno, &difflist_len);
+  const int32_t* quad_table = (allele_idx == 0)? kGenoRInt32QuadsFlipped : kGenoRInt32Quads;
+  if (((allele_idx == 0) && (difflist_common_geno != 2)) ||
+      ((allele_idx == 1) && (difflist_common_geno != 0)) ||
+      (static_cast<uint32_t>(allele_idx) > 1)) {
+    if (buf.size() != _subset_size) {
+      // Note that buf is *not* required to be the expected size when we return
+      // the sparse representation.
+      using namespace plink2;
+      char errstr_buf[256];
+      char* write_iter = strcpya_k(errstr_buf, "buf has wrong length (");
+      write_iter = wtoa(buf.size(), write_iter);
+      write_iter = strcpya_k(write_iter, "; ");
+      write_iter = u32toa(_subset_size, write_iter);
+      strcpy_k(write_iter, " expected)");
+      stop(errstr_buf);
+    }
+    if (difflist_common_geno != UINT32_MAX) {
+      // Sparse, but not w.r.t. the correct allele.  Just return dense
+      // representation.
+      plink2::PgrDifflistToGenovecUnsafe(_raregeno_buf, _difflist_sample_ids_buf, difflist_common_geno, _subset_size, difflist_len, _pgv.genovec);
+    }
+    plink2::GenoarrLookup256x4bx4(_pgv.genovec, quad_table, _subset_size, &buf[0]);
+    return;
+  }
+  *sample_nums_ptr = IntegerVector(difflist_len);
+  int* sample_nums_data = &((*sample_nums_ptr)[0]);
+  for (uint32_t uii = 0; uii != difflist_len; ++uii) {
+    sample_nums_data[uii] = _difflist_sample_ids_buf[uii] + 1;
+  }
+  *allele_counts_ptr = IntegerVector(difflist_len);
+  int* allele_counts_data = &((*allele_counts_ptr)[0]);
+  plink2::GenoarrLookup256x4bx4(_raregeno_buf, quad_table, difflist_len, allele_counts_data);
+}
+
+static const double kGenoRDoublePairsFlipped[32] ALIGNV16 = PAIR_TABLE16(0.0, 1.0, 2.0, NA_REAL);
+
+void RPgenReader::ReadMaybeSparseHardcalls(NumericVector buf, int variant_idx, int allele_idx, int max_difflist_len, IntegerVector* sample_nums_ptr, NumericVector* allele_dosages_ptr) {
+  uint32_t difflist_common_geno;
+  uint32_t difflist_len;
+  ReadMaybeSparseHardcallsInternal(variant_idx, max_difflist_len, &difflist_common_geno, &difflist_len);
+  const double* pair_table = (allele_idx == 0)? kGenoRDoublePairsFlipped : kGenoRDoublePairs;
+  if (((allele_idx == 0) && (difflist_common_geno != 2)) ||
+      ((allele_idx == 1) && (difflist_common_geno != 0)) ||
+      (static_cast<uint32_t>(allele_idx) > 1)) {
+    if (buf.size() != _subset_size) {
+      using namespace plink2;
+      char errstr_buf[256];
+      char* write_iter = strcpya_k(errstr_buf, "buf has wrong length (");
+      write_iter = wtoa(buf.size(), write_iter);
+      write_iter = strcpya_k(write_iter, "; ");
+      write_iter = u32toa(_subset_size, write_iter);
+      strcpy_k(write_iter, " expected)");
+      stop(errstr_buf);
+    }
+    if (difflist_common_geno != UINT32_MAX) {
+      // Sparse, but not w.r.t. the correct allele.  Just return dense
+      // representation.
+      plink2::PgrDifflistToGenovecUnsafe(_raregeno_buf, _difflist_sample_ids_buf, difflist_common_geno, _subset_size, difflist_len, _pgv.genovec);
+    }
+    plink2::GenoarrLookup16x8bx2(_pgv.genovec, pair_table, _subset_size, &buf[0]);
+    return;
+  }
+  *sample_nums_ptr = IntegerVector(difflist_len);
+  int* sample_nums_data = &((*sample_nums_ptr)[0]);
+  for (uint32_t uii = 0; uii != difflist_len; ++uii) {
+    sample_nums_data[uii] = _difflist_sample_ids_buf[uii] + 1;
+  }
+  *allele_dosages_ptr = NumericVector(difflist_len);
+  double* allele_dosages_data = &((*allele_dosages_ptr)[0]);
+  plink2::GenoarrLookup16x8bx2(_raregeno_buf, pair_table, difflist_len, allele_dosages_data);
 }
 
 void RPgenReader::Read(NumericVector buf, int variant_idx, int allele_idx) {
@@ -375,13 +496,74 @@ void RPgenReader::Read(NumericVector buf, int variant_idx, int allele_idx) {
     stop(errstr_buf);
   }
   uint32_t dosage_ct;
-  plink2::PglErr reterr = PgrGet1D(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec, _pgv.dosage_present, _pgv.dosage_main, &dosage_ct);
+  plink2::PglErr reterr = plink2::PgrGet1D(_subset_include_vec, _subset_index, _subset_size, variant_idx, allele_idx, _state_ptr, _pgv.genovec, _pgv.dosage_present, _pgv.dosage_main, &dosage_ct);
   if (reterr != plink2::kPglRetSuccess) {
     char errstr_buf[256];
     snprintf(errstr_buf, 256, "PgrGet1D() error %d", static_cast<int>(reterr));
     stop(errstr_buf);
   }
   plink2::Dosage16ToDoubles(kGenoRDoublePairs, _pgv.genovec, _pgv.dosage_present, _pgv.dosage_main, _subset_size, dosage_ct, &buf[0]);
+}
+
+void RPgenReader::ReadMaybeSparse(NumericVector buf, int variant_idx, int allele_idx, int max_difflist_len, IntegerVector* sample_nums_ptr, NumericVector* allele_dosages_ptr) {
+  if (!_info_ptr) {
+    stop("pgen is closed");
+  }
+  const uint32_t raw_variant_ct = _info_ptr->raw_variant_ct;
+  if (static_cast<uint32_t>(variant_idx) >= raw_variant_ct) {
+    char errstr_buf[256];
+    snprintf(errstr_buf, 256, "variant_num out of range (%d; must be 1..%u)", variant_idx + 1, _info_ptr->raw_variant_ct);
+    stop(errstr_buf);
+  }
+  uint32_t dosage_ct;
+  uint16_t difflist_common_dosage;
+  plink2::PglErr reterr = plink2::PgrGetDMaybeSparse(_subset_include_vec, _subset_index, _subset_size, variant_idx, max_difflist_len, _state_ptr, _pgv.genovec, _pgv.dosage_present, _pgv.dosage_main, &dosage_ct, &difflist_common_dosage, _difflist_sample_ids_buf);
+  if (reterr != plink2::kPglRetSuccess) {
+    char errstr_buf[256];
+    char* log = plink2::PglReturnLog();
+    if (log == nullptr) {
+      snprintf(errstr_buf, 256, "PgrGetDMaybeSparse() error %d", static_cast<int>(reterr));
+    } else {
+      snprintf(errstr_buf, 256, "PgrGetDMaybeSparse() error %d: %s", static_cast<int>(reterr), log);
+    }
+    stop(errstr_buf);
+  }
+  if (difflist_common_dosage == 1) {
+    if (buf.size() != _subset_size) {
+      using namespace plink2;
+      char errstr_buf[256];
+      char* write_iter = strcpya_k(errstr_buf, "buf has wrong length (");
+      write_iter = wtoa(buf.size(), write_iter);
+      write_iter = strcpya_k(write_iter, "; ");
+      write_iter = u32toa(_subset_size, write_iter);
+      strcpy_k(write_iter, " expected)");
+      stop(errstr_buf);
+    }
+    const double* pair_table = (allele_idx == 0)? kGenoRDoublePairsFlipped : kGenoRDoublePairs;
+    plink2::Dosage16ToDoubles(pair_table, _pgv.genovec, _pgv.dosage_present, _pgv.dosage_main, _subset_size, dosage_ct, &buf[0]);
+    return;
+  }
+  *sample_nums_ptr = IntegerVector(dosage_ct);
+  int* sample_nums_data = &((*sample_nums_ptr)[0]);
+  for (uint32_t uii = 0; uii != dosage_ct; ++uii) {
+    sample_nums_data[uii] = _difflist_sample_ids_buf[uii] + 1;
+  }
+  const uint16_t* dosage_main = _pgv.dosage_main;
+  *allele_dosages_ptr = NumericVector(dosage_ct);
+  double* allele_dosages_data = &((*allele_dosages_ptr)[0]);
+  if (allele_idx == 0) {
+    for (uint32_t uii = 0; uii != dosage_ct; ++uii) {
+      const uint16_t cur_dosage_int = dosage_main[uii];
+      const double cur_dosage_dbl = (cur_dosage_int == 65535)? NA_REAL : ((static_cast<int32_t>(32768 - cur_dosage_int)) * (1.0 / 16384.0));
+      allele_dosages_data[uii] = cur_dosage_dbl;
+    }
+  } else {
+    for (uint32_t uii = 0; uii != dosage_ct; ++uii) {
+      const uint16_t cur_dosage_int = dosage_main[uii];
+      const double cur_dosage_dbl = (cur_dosage_int == 65535)? NA_REAL : ((static_cast<int32_t>(cur_dosage_int)) * (1.0 / 16384.0));
+      allele_dosages_data[uii] = cur_dosage_dbl;
+    }
+  }
 }
 
 static const uint64_t kGenoToRIntcodeDPairs[32] ALIGNV16 = PAIR_TABLE16(0, 0x100000000LLU, 0x100000001LLU, 0x8000000080000000LLU);
@@ -555,7 +737,7 @@ void RPgenReader::ReadIntList(IntegerMatrix buf, IntegerVector variant_subset) {
       snprintf(errstr_buf, 256, "variant_subset element out of range (%d; must be 1..%u)", variant_idx + 1, raw_variant_ct);
       stop(errstr_buf);
     }
-    plink2::PglErr reterr = PgrGet(_subset_include_vec, _subset_index, _subset_size, variant_idx, _state_ptr, _pgv.genovec);
+    plink2::PglErr reterr = plink2::PgrGet(_subset_include_vec, _subset_index, _subset_size, variant_idx, _state_ptr, _pgv.genovec);
     if (reterr != plink2::kPglRetSuccess) {
       char errstr_buf[256];
       snprintf(errstr_buf, 256, "PgrGet() error %d", static_cast<int>(reterr));
@@ -582,7 +764,7 @@ void RPgenReader::ReadList(NumericMatrix buf, IntegerVector variant_subset, bool
       stop(errstr_buf);
     }
     uint32_t dosage_ct;
-    plink2::PglErr reterr = PgrGetD(_subset_include_vec, _subset_index, _subset_size, variant_idx, _state_ptr, _pgv.genovec, _pgv.dosage_present, _pgv.dosage_main, &dosage_ct);
+    plink2::PglErr reterr = plink2::PgrGetD(_subset_include_vec, _subset_index, _subset_size, variant_idx, _state_ptr, _pgv.genovec, _pgv.dosage_present, _pgv.dosage_main, &dosage_ct);
     if (reterr != plink2::kPglRetSuccess) {
       char errstr_buf[256];
       snprintf(errstr_buf, 256, "PgrGetD() error %d", static_cast<int>(reterr));
@@ -709,6 +891,32 @@ void RPgenReader::SetSampleSubsetInternal(IntegerVector sample_subset_1based) {
   plink2::FillCumulativePopcounts(sample_include, raw_sample_ctl, _subset_cumulative_popcounts);
   plink2::PgrSetSampleSubsetIndex(_subset_cumulative_popcounts, _state_ptr, &_subset_index);
   _subset_size = subset_size;
+}
+
+void RPgenReader::ReadMaybeSparseHardcallsInternal(int variant_idx, int max_difflist_len, uint32_t* difflist_common_geno_ptr, uint32_t* difflist_len_ptr) {
+  // Fills {_raregeno_buf, _difflist_sample_ids_buf, *difflist_common_geno_ptr,
+  // *difflist_len_ptr} iff hardcalls are either (i) stored as a simple
+  // difflist no longer than max_difflist_len, or (ii) stored as a list of
+  // differences from an earlier variant, which is itself stored as a simple
+  // difflist, and the sum of the two list lengths is <= max_difflist_len.
+  //
+  // Otherwise, fills _pgv.genovec and sets *difflist_common_geno_ptr to
+  // UINT32_MAX.
+  if (!_info_ptr) {
+    stop("pgen is closed");
+  }
+  const uint32_t raw_variant_ct = _info_ptr->raw_variant_ct;
+  if (static_cast<uint32_t>(variant_idx) >= raw_variant_ct) {
+    char errstr_buf[256];
+    snprintf(errstr_buf, 256, "variant_num out of range (%d; must be 1..%u)", variant_idx + 1, _info_ptr->raw_variant_ct);
+    stop(errstr_buf);
+  }
+  plink2::PglErr reterr = plink2::PgrGetDifflistOrGenovec(_subset_include_vec, _subset_index, _subset_size, max_difflist_len, variant_idx, _state_ptr, _pgv.genovec, difflist_common_geno_ptr, _raregeno_buf, _difflist_sample_ids_buf, difflist_len_ptr);
+  if (reterr != plink2::kPglRetSuccess) {
+    char errstr_buf[256];
+    snprintf(errstr_buf, 256, "PgrGetDifflistOrGenovec() error %d", static_cast<int>(reterr));
+    stop(errstr_buf);
+  }
 }
 
 void RPgenReader::ReadAllelesPhasedInternal(int variant_idx) {
@@ -927,7 +1135,7 @@ LogicalVector BoolBuf(List pgen) {
 //' @param variant_num Variant index (1-based).
 //' @param allele_num Allele index; 1 corresponds to REF, 2 to the first ALT
 //' allele, 3 to the second ALT allele if it exists, etc.  Optional, defaults
-//' 2.
+//' to 2.
 //' @return No return value, called for buf-filling side-effect.
 //' @export
 // [[Rcpp::export]]
@@ -951,6 +1159,89 @@ void ReadHardcalls(List pgen, SEXP buf, int variant_num, int allele_num = 2) {
   }
 }
 
+//' Returns whether hardcalls for the variant_numth variant and given allele
+//' are represented in a sparse manner that is supported by
+//' ReadSparseHardcalls().
+//'
+//' @param pgen Object returned by NewPgen().
+//' @param variant_num Variant index (1-based).
+//' @param allele_num Allele index; 1 corresponds to REF, 2 to the first ALT
+//' allele, 3 to the second ALT allele if it exists, etc.  Optional, defaults
+//' to 2.
+//' @return True iff the (variant, allele) pair has a sparse representation
+//' that can be returned by ReadSparseHardcalls().
+//' @export
+// [[Rcpp::export]]
+bool HasSparseHardcalls(List pgen, int variant_num, int allele_num = 2) {
+  if (strcmp_r_c(pgen[0], "pgen")) {
+    stop("pgen is not a pgen object");
+  }
+  XPtr<class RPgenReader> rp = as<XPtr<class RPgenReader> >(pgen[1]);
+  const int variant_idx = variant_num - 1;
+  const uint32_t vrtype = rp->GetVrtype(variant_idx);
+  // Don't support multiallelic variants outside the trivial REF case for now.
+  if (allele_num == 1) {
+    return ((vrtype & 7) == 6);
+  } else if (allele_num == 2) {
+    return ((vrtype & 15) == 4);
+  } else {
+    return false;
+  }
+}
+
+//' If HasSparseHardcalls() is true, returns a sparse representation for the
+//' (variant, allele) pair.  If HasSparseHardcalls() is false, the function
+//' fails.
+//'
+//' @param pgen Object returned by NewPgen().
+//' @param variant_num Variant index (1-based).
+//' @param allele_num Allele index; 1 corresponds to REF, 2 to the first ALT
+//' allele, 3 to the second ALT allele if it exists, etc.  Optional, defaults
+//' to 2.
+//' @param return_ints Whether to make the "counts" component of the return
+//' value an IntegerVector instead of a NumericVector; defaults to false.
+//' @return An object where "sample_nums" is an increasing sequence of positive
+//' integers listing which samples have the allele, and "counts" is a vector
+//' listing the allele counts for those samples.
+//' @export
+// [[Rcpp::export]]
+List ReadSparseHardcalls(List pgen, int variant_num, int allele_num = 2, bool return_ints = false) {
+  if (strcmp_r_c(pgen[0], "pgen")) {
+    stop("pgen is not a pgen object");
+  }
+  XPtr<class RPgenReader> rp = as<XPtr<class RPgenReader> >(pgen[1]);
+  const int variant_idx = variant_num - 1;
+  const uint32_t vrtype = rp->GetVrtype(variant_idx);
+  const bool is_supported_sparse =
+    ((allele_num == 1) && ((vrtype & 7) == 6)) ||
+    ((allele_num == 2) && ((vrtype & 15) == 4));
+  if (!is_supported_sparse) {
+    stop("(variant, allele) does not have supported sparse representation");
+  }
+  IntegerVector sample_nums(0);
+  const int allele_idx = allele_num - 1;
+  const uint32_t file_sample_ct = rp->GetRawSampleCt();
+  // Should be impossible for this to fail.
+  const uint32_t max_difflist_len = 2 * (file_sample_ct / plink2::kPglMaxDifflistLenDivisor);
+  if (return_ints) {
+    IntegerVector unused_buf(0);
+    IntegerVector integer_counts(0);
+    rp->ReadIntMaybeSparseHardcalls(unused_buf, variant_idx, allele_idx, max_difflist_len, &sample_nums, &integer_counts);
+    return List::create(
+                        _["sample_nums"] = sample_nums,
+                        _["counts"] = integer_counts
+                        );
+  } else {
+    NumericVector unused_buf(0);
+    NumericVector numeric_counts(0);
+    rp->ReadMaybeSparseHardcalls(unused_buf, variant_idx, allele_idx, max_difflist_len, &sample_nums, &numeric_counts);
+    return List::create(
+                        _["sample_nums"] = sample_nums,
+                        _["counts"] = numeric_counts
+                        );
+  }
+}
+
 //' Loads the variant_numth variant, and then fills buf with numeric dosages
 //' in [0, 2] indicating the dosages of the first ALT (or user-specified)
 //' allele for each sample, with missing values represented by NA.
@@ -963,7 +1254,7 @@ void ReadHardcalls(List pgen, SEXP buf, int variant_num, int allele_num = 2) {
 //' @param variant_num Variant index (1-based).
 //' @param allele_num Allele index; 1 corresponds to REF, 2 to the first ALT
 //' allele, 3 to the second ALT allele if it exists, etc.  Optional, defaults
-//' 2.
+//' to 2.
 //' @return No return value, called for buf-filling side-effect.
 //' @export
 // [[Rcpp::export]]
@@ -976,6 +1267,106 @@ void Read(List pgen, NumericVector buf, int variant_num, int allele_num = 2) {
   }
   XPtr<class RPgenReader> rp = as<XPtr<class RPgenReader> >(pgen[1]);
   rp->Read(buf, variant_num - 1, allele_num - 1);
+}
+
+//' Returns whether dosages for the variant_numth variant and given allele
+//' are represented in a sparse manner that is supported by
+//' ReadSparse(), under the current sample subset.
+//'
+//' @param pgen Object returned by NewPgen().
+//' @param variant_num Variant index (1-based).
+//' @param allele_num Allele index; 1 corresponds to REF, 2 to the first ALT
+//' allele, 3 to the second ALT allele if it exists, etc.  Optional, defaults
+//' to 2.
+//' @return True iff the (variant, allele) pair has a sparse representation
+//' that can be returned by ReadSparse().
+//' @export
+// [[Rcpp::export]]
+bool HasSparse(List pgen, int variant_num, int allele_num = 2) {
+  if (strcmp_r_c(pgen[0], "pgen")) {
+    stop("pgen is not a pgen object");
+  }
+  XPtr<class RPgenReader> rp = as<XPtr<class RPgenReader> >(pgen[1]);
+  const int variant_idx = variant_num - 1;
+  const uint32_t vrtype = rp->GetVrtype(variant_idx);
+  // Don't support multiallelic variants outside the trivial REF case for now.
+  if (allele_num == 1) {
+    if ((vrtype & 7) != 6) {
+      return false;
+    }
+  } else if (allele_num == 2) {
+    if ((vrtype & 15) != 4) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  const uint32_t vrtype_dosage = vrtype & 0x60;
+  if (vrtype_dosage != 0x20) {
+    return (vrtype_dosage == 0);
+  }
+  // Dosage-list.  If hardcall-phase information is present and we're
+  // extracting a sample-subset, the current implementation doesn't support
+  // sparse return.  Otherwise we're ok.
+  return (!(vrtype & 0x10)) || (rp->GetRawSampleCt() == rp->GetSubsetSize());
+}
+
+//' If HasSparse() is true, returns a sparse representation for the
+//' (variant, allele) pair.  If HasSparse() is false, the function fails.
+//'
+//' @param pgen Object returned by NewPgen().
+//' @param variant_num Variant index (1-based).
+//' @param allele_num Allele index; 1 corresponds to REF, 2 to the first ALT
+//' allele, 3 to the second ALT allele if it exists, etc.  Optional, defaults
+//' to 2.
+//' @return An object where "sample_nums" is an increasing sequence of positive
+//' integers listing which samples have the allele, and "dosages" is a vector
+//' listing the dosages (on a 0-2 scale) for those samples.
+//' @export
+// [[Rcpp::export]]
+List ReadSparse(List pgen, int variant_num, int allele_num = 2) {
+  if (strcmp_r_c(pgen[0], "pgen")) {
+    stop("pgen is not a pgen object");
+  }
+  XPtr<class RPgenReader> rp = as<XPtr<class RPgenReader> >(pgen[1]);
+  const int variant_idx = variant_num - 1;
+  const uint32_t vrtype = rp->GetVrtype(variant_idx);
+  const int allele_idx = allele_num - 1;
+  const uint32_t file_sample_ct = rp->GetRawSampleCt();
+  // Keep this in sync with HasSparse().
+  if (allele_idx == 0) {
+    if ((vrtype & 7) != 6) {
+    ReadSparse_fail:
+      stop("(variant, allele) does not have supported sparse representation");
+    }
+  } else if (allele_idx == 1) {
+    if ((vrtype & 15) != 4) {
+      goto ReadSparse_fail;
+    }
+  } else {
+    goto ReadSparse_fail;
+  }
+  const uint32_t vrtype_dosage = vrtype & 0x60;
+  if (vrtype_dosage == 0x20) {
+    if ((vrtype & 0x10) && (file_sample_ct != rp->GetSubsetSize())) {
+      goto ReadSparse_fail;
+    }
+  } else if (vrtype_dosage != 0) {
+    goto ReadSparse_fail;
+  }
+
+  IntegerVector sample_nums(0);
+
+  // Should be impossible for this to fail.
+  const uint32_t max_difflist_len = 3 * (file_sample_ct / plink2::kPglMaxDifflistLenDivisor);
+
+  NumericVector unused_buf(0);
+  NumericVector dosages(0);
+  rp->ReadMaybeSparse(unused_buf, variant_idx, allele_idx, max_difflist_len, &sample_nums, &dosages);
+  return List::create(
+                      _["sample_nums"] = sample_nums,
+                      _["dosages"] = dosages
+                      );
 }
 
 //' Loads the variant_numth variant, and then fills acbuf with integer allele

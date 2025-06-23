@@ -21,36 +21,16 @@
 // Standalone string-printing and parsing functions which neither make
 // permanent memory allocations nor use g_bigstack for temporary allocations.
 
+#include <math.h>  // fabs(), isfinite()
+#include <stdlib.h>
+#include <string.h>
+
 #include "plink2_base.h"
 
-#include <math.h>  // fabs(), isfinite()
-#include <stddef.h>  // offsetof()
-
 #ifdef __cplusplus
-#  include <algorithm>
+#  include <algorithm>  // IWYU pragma: export
 #  if __cplusplus >= 201902L && defined(__GNUC__) && !defined(__clang__)
-#    include <execution>
-#  endif
-#  ifdef _WIN32
-    // Windows C++11 <algorithm> resets these values :(
-#    undef PRIu64
-#    undef PRId64
-#    define PRIu64 "I64u"
-#    define PRId64 "I64d"
-#    undef PRIuPTR
-#    undef PRIdPTR
-#    ifdef __LP64__
-#      define PRIuPTR PRIu64
-#      define PRIdPTR PRId64
-#    else
-#      if __cplusplus < 201103L
-#        define PRIuPTR "lu"
-#        define PRIdPTR "ld"
-#      else
-#        define PRIuPTR "u"
-#        define PRIdPTR "d"
-#      endif
-#    endif
+#    include <execution>  // IWYU pragma: export
 #  endif
 #endif
 
@@ -78,15 +58,23 @@ static const double kE = 2.7182818284590452;
 static const double kPi = 3.1415926535897932;
 static const double kSqrt2 = 1.4142135623730951;
 static const double kRecipE = 0.36787944117144233;
-static const double kRecip2m53 = 0.00000000000000011102230246251565404236316680908203125;
 
-// floating point comparison-to-nonzero tolerance, currently 2^{-30}
-static const double kEpsilon = 0.000000000931322574615478515625;
-// less tolerant versions (2^{-35}, 2^{-44}) for some exact calculations
-static const double kSmallEpsilon = 0.00000000000005684341886080801486968994140625;
-
-// 2^{-21}, must be >= sqrt(kSmallEpsilon)
-static const double kBigEpsilon = 0.000000476837158203125;
+static const double k2p64 = 18446744073709551616.0;
+// Negative powers of 2, mostly used as tolerances for floating-point
+// approximate-equality checks.
+static const double k2m21 = 1.0 / (1 << 21);
+// must be >= sqrt(kSmallEpsilon)
+static const double kBigEpsilon = k2m21;
+static const double k2m30 = 1.0 / (1 << 30);
+static const double kEpsilon = k2m30;
+static const double k2m32 = 1.0 / (1LLU << 32);
+static const double k2m34 = 1.0 / (1LLU << 34);
+static const double k2m35 = 1.0 / (1LLU << 35);
+static const double k2m40 = 1.0 / (1LLU << 40);
+static const double k2m44 = 1.0 / (1LLU << 44);
+static const double kSmallEpsilon = k2m44;
+static const double k2m47 = 1.0 / (1LLU << 47);
+static const double k2m53 = 1.0 / (1LLU << 53);
 
 // 2^{-83} bias to give exact tests maximum ability to determine tiny p-values.
 // (~2^{-53} is necessary to take advantage of denormalized small numbers, then
@@ -254,13 +242,25 @@ HEADER_INLINE char* strchrnul3(char* ss, unsigned char ucc1, unsigned char ucc2,
 }
 #endif
 
-#ifndef _GNU_SOURCE
+#ifdef _GNU_SOURCE
+// Now capitalized to avoid headache introduced by macOS 15.4.
+//
+// The runtime __builtin_available() mechanism is fine for larger or
+// rarely-called functions.  But if the macOS 15.4 strchrnul() implementation
+// is currently good enough to be worth using despite the runtime-dispatch
+// overhead, that means rawmemchr2() and similar functions should be fixed; it
+// does not mean runtime dispatch should actually be used for this type of
+// inner-loop function.
+HEADER_INLINE CXXCONST_CP Strchrnul(const char* str, int needle) {
+  return S_CAST(CXXCONST_CP, strchrnul(str, needle));
+}
+#else
 #  ifdef __LP64__
-HEADER_INLINE CXXCONST_CP strchrnul(const char* str, int needle) {
+HEADER_INLINE CXXCONST_CP Strchrnul(const char* str, int needle) {
   return S_CAST(CXXCONST_CP, rawmemchr2(str, 0, needle));
 }
 #  else
-HEADER_INLINE CXXCONST_CP strchrnul(const char* str, int cc) {
+HEADER_INLINE CXXCONST_CP Strchrnul(const char* str, int cc) {
   const char* strchr_result = strchr(str, cc);
   if (strchr_result) {
     return S_CAST(CXXCONST_CP, strchr_result);
@@ -268,12 +268,12 @@ HEADER_INLINE CXXCONST_CP strchrnul(const char* str, int cc) {
   return S_CAST(CXXCONST_CP, strnul(str));
 }
 #  endif
+#endif
 
-#  ifdef __cplusplus
-HEADER_INLINE char* strchrnul(char* ss, int needle) {
-  return const_cast<char*>(strchrnul(const_cast<const char*>(ss), needle));
+#ifdef __cplusplus
+HEADER_INLINE char* Strchrnul(char* ss, int needle) {
+  return const_cast<char*>(Strchrnul(const_cast<const char*>(ss), needle));
 }
-#  endif
 #endif
 
 // These return 1 at eoln.
@@ -794,12 +794,12 @@ HEADER_INLINE CXXCONST_CP FirstPrechar(const char* str_iter, uint32_t char_code)
 // It is worth distinguishing between incremental parsing functions where it's
 // rarely necessary to scan more than 40 characters or so, and scans which are
 // likely to be long-range.  The former is frequently best handled with a
-// simple loop even when AVX2 movemask is available; it may not even be worth
-// inserting a conditional to select between the two when length is known.  The
-// latter benefits greatly from movemask.
+// simple loop even when AVX2 movemask or ARM narrowing-shift is available; it
+// may not even be worth inserting a conditional to select between the two when
+// length is known.  The latter benefits greatly from movemask/shrn-4.
 //
 // The following standard library and plink2-library scanning functions can be
-// trusted to use movemask:
+// trusted to use movemask/shrn-4:
 //   strlen, strchr, memchr
 //   rawmemchr, strchrnul
 //   rawmemchr2, rawmemchr3, strnul, strchrnul_n, strchrnul2, strchrnul3,
@@ -1147,20 +1147,29 @@ HEADER_INLINE CXXCONST_CP AdvToNthDelimChecked(const char* str_iter, const char*
   const VecUc vvec_all_delim = vecuc_set1(delim);
   VecUc cur_vvec = *str_viter;
   VecUc delim_vvec = (cur_vvec == vvec_all_delim);
-  uint32_t delimiter_bytes = vecuc_movemask(delim_vvec);
   const uint32_t leading_byte_ct = starting_addr - R_CAST(uintptr_t, str_viter);
-  const uint32_t leading_mask = UINT32_MAX << leading_byte_ct;
-  delimiter_bytes &= leading_mask;
+#  ifndef SIMDE_ARM_NEON_A32V8_NATIVE
+  uint32_t delimiter_bytes = vecuc_movemask(delim_vvec) >> leading_byte_ct;
   for (uint32_t remaining_delim_ct = ct; ; ) {
     const uint32_t cur_delim_ct = PopcountVec8thUint(delimiter_bytes);
     if (cur_delim_ct >= remaining_delim_ct) {
-      delimiter_bytes = ClearBottomSetBits(remaining_delim_ct - 1, delimiter_bytes);
-      const uint32_t byte_offset_in_vec = ctzu32(delimiter_bytes);
-      const uintptr_t result_addr = R_CAST(uintptr_t, str_viter) + byte_offset_in_vec;
-      if (result_addr >= ending_addr) {
-        return nullptr;
+      // todo: confirm this is faster when done outside vector-space, despite
+      // additional comparison relative to AdvToNthDelimOverread
+
+      // must not check preceding bytes if this happens on first loop iteration
+      if (R_CAST(const char*, str_viter) > str_iter) {
+        str_iter = R_CAST(const char*, str_viter);
       }
-      return R_CAST(CXXCONST_CP, result_addr);
+      for (; str_iter != str_end; ++str_iter) {
+        const char cc = *str_iter;
+        if (cc != delim) {
+          continue;
+        }
+        if (!(--remaining_delim_ct)) {
+          return S_CAST(CXXCONST_CP, str_iter);
+        }
+      }
+      return nullptr;
     }
     remaining_delim_ct -= cur_delim_ct;
     ++str_viter;
@@ -1171,6 +1180,35 @@ HEADER_INLINE CXXCONST_CP AdvToNthDelimChecked(const char* str_iter, const char*
     delim_vvec = (cur_vvec == vvec_all_delim);
     delimiter_bytes = vecuc_movemask(delim_vvec);
   }
+#  else
+  uint64_t delimiter_nybbles = arm_shrn4_uc(delim_vvec) >> (4 * leading_byte_ct);
+  for (uint32_t remaining_delim_ct = ct; ; ) {
+    const uint32_t cur_delim_ct = count_set_nybbles(delimiter_nybbles);
+    if (cur_delim_ct >= remaining_delim_ct) {
+      if (R_CAST(const char*, str_viter) > str_iter) {
+        str_iter = R_CAST(const char*, str_viter);
+      }
+      for (; str_iter != str_end; ++str_iter) {
+        const char cc = *str_iter;
+        if (cc != delim) {
+          continue;
+        }
+        if (!(--remaining_delim_ct)) {
+          return S_CAST(CXXCONST_CP, str_iter);
+        }
+      }
+      return nullptr;
+    }
+    remaining_delim_ct -= cur_delim_ct;
+    ++str_viter;
+    if (R_CAST(uintptr_t, str_viter) >= ending_addr) {
+      return nullptr;
+    }
+    cur_vvec = *str_viter;
+    delim_vvec = (cur_vvec == vvec_all_delim);
+    delimiter_nybbles = arm_shrn4_uc(delim_vvec);
+  }
+#  endif
 }
 
 HEADER_INLINE CXXCONST_CP AdvToNthDelim(const char* str_iter, uint32_t ct, char delim) {
@@ -1179,17 +1217,24 @@ HEADER_INLINE CXXCONST_CP AdvToNthDelim(const char* str_iter, uint32_t ct, char 
   VecUc* str_viter = R_CAST(VecUc*, RoundDownPow2(starting_addr, kBytesPerVec));
   VecUc cur_vvec = *str_viter;
   VecUc delim_vvec = (cur_vvec == vvec_all_delim);
-  uint32_t delimiter_bytes = vecuc_movemask(delim_vvec);
   const uint32_t leading_byte_ct = starting_addr - R_CAST(uintptr_t, str_viter);
-  const uint32_t leading_mask = UINT32_MAX << leading_byte_ct;
-  delimiter_bytes &= leading_mask;
+#  ifndef SIMDE_ARM_NEON_A32V8_NATIVE
+  uint32_t delimiter_bytes = vecuc_movemask(delim_vvec) >> leading_byte_ct;
   for (uint32_t remaining_delim_ct = ct; ; ) {
     const uint32_t cur_delim_ct = PopcountVec8thUint(delimiter_bytes);
     if (cur_delim_ct >= remaining_delim_ct) {
-      delimiter_bytes = ClearBottomSetBits(remaining_delim_ct - 1, delimiter_bytes);
-      const uint32_t byte_offset_in_vec = ctzu32(delimiter_bytes);
-      const uintptr_t result_addr = R_CAST(uintptr_t, str_viter) + byte_offset_in_vec;
-      return R_CAST(CXXCONST_CP, result_addr);
+      if (R_CAST(const char*, str_viter) > str_iter) {
+        str_iter = R_CAST(const char*, str_viter);
+      }
+      for (; ; ++str_iter) {
+        const char cc = *str_iter;
+        if (cc != delim) {
+          continue;
+        }
+        if (!(--remaining_delim_ct)) {
+          return S_CAST(CXXCONST_CP, str_iter);
+        }
+      }
     }
     remaining_delim_ct -= cur_delim_ct;
     ++str_viter;
@@ -1197,6 +1242,31 @@ HEADER_INLINE CXXCONST_CP AdvToNthDelim(const char* str_iter, uint32_t ct, char 
     delim_vvec = (cur_vvec == vvec_all_delim);
     delimiter_bytes = vecuc_movemask(delim_vvec);
   }
+#  else
+  uint64_t delimiter_nybbles = arm_shrn4_uc(delim_vvec) >> (4 * leading_byte_ct);
+  for (uint32_t remaining_delim_ct = ct; ; ) {
+    const uint32_t cur_delim_ct = count_set_nybbles(delimiter_nybbles);
+    if (cur_delim_ct >= remaining_delim_ct) {
+      if (R_CAST(const char*, str_viter) > str_iter) {
+        str_iter = R_CAST(const char*, str_viter);
+      }
+      for (; ; ++str_iter) {
+        const char cc = *str_iter;
+        if (cc != delim) {
+          continue;
+        }
+        if (!(--remaining_delim_ct)) {
+          return S_CAST(CXXCONST_CP, str_iter);
+        }
+      }
+    }
+    remaining_delim_ct -= cur_delim_ct;
+    ++str_viter;
+    cur_vvec = *str_viter;
+    delim_vvec = (cur_vvec == vvec_all_delim);
+    delimiter_nybbles = arm_shrn4_uc(delim_vvec);
+  }
+#  endif
 }
 
 HEADER_INLINE CXXCONST_CP AdvToNthDelimOverread(const char* str_iter, uint32_t ct, char delim) {
@@ -1208,28 +1278,8 @@ HEADER_INLINE CXXCONST_CP AdvToNthDelimOverread(const char* str_iter, uint32_t c
     uint32_t delimiter_bytes = vecuc_movemask(delim_vvec);
     const uint32_t cur_delim_ct = PopcountVec8thUint(delimiter_bytes);
 #  else
-    // Unfortunately, movemask and word-popcount don't have good translations
-    // to ARMv8.
-    // We change the algorithm in the manner suggested by Danila Kutenin at
-    //   https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon .
-    // TODO: write this in a way that avoids dependency on SIMDe internals.
-    // (This should include updating how the ifndef guard works.  Current guard
-    // is a quick and dirty hack that covers M1.)
-    simde__m128i_private delim_vvec_ = simde__m128i_to_private(delim_vvec);
-    // Just like SSE2 delimiter_bytes, except bits 0, 4, 8, ..., 60 are used
-    // instead of bits 0, 1, 2, ..., 15.
-    const uint64_t delimiter_bits4 = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(delim_vvec_.neon_i8, 4)), 0) & kMask1111;
-    // Branchlessly count the number of set bits, taking advantage of the
-    // limited set of positions they can be in.
-    // Multiplication by the magic constant kMask1111 usually puts the sum of
-    // all 16 bits of interest in the high nybble of the result... except that
-    // the nybble overflows when all 16 bits are set.
-    // We work around this by
-    // (i) multiplying by (kMask1111 >> 4) instead, which excludes the lowest
-    //     bit from the high-nybble sum, and
-    // (ii) then adding the lowest bit afterward.
-    const uint32_t cur_delim_ct_excluding_lowest = (delimiter_bits4 * (kMask1111 >> 4)) >> 60;
-    const uint32_t cur_delim_ct = cur_delim_ct_excluding_lowest + (delimiter_bits4 & 1);
+    const uint64_t delimiter_nybbles = arm_shrn4_uc(delim_vvec);
+    const uint32_t cur_delim_ct = count_set_nybbles(delimiter_nybbles);
 #  endif
     if (cur_delim_ct >= remaining_delim_ct) {
       // Faster to do this part outside of vector-space in my testing.

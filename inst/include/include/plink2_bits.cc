@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-
 #include "plink2_bits.h"
 
 #ifdef __cplusplus
@@ -387,7 +386,7 @@ uintptr_t NextNonmissingUnsafe(const uintptr_t* genoarr, uintptr_t loc) {
 */
 
 uint32_t AdvBoundedTo1Bit(const uintptr_t* bitarr, uint32_t loc, uint32_t ceil) {
-  // safe version.
+  // Can overread a single word if loc == ceil.
   const uintptr_t* bitarr_iter = &(bitarr[loc / kBitsPerWord]);
   uintptr_t ulii = (*bitarr_iter) >> (loc % kBitsPerWord);
   if (ulii) {
@@ -406,7 +405,7 @@ uint32_t AdvBoundedTo1Bit(const uintptr_t* bitarr, uint32_t loc, uint32_t ceil) 
 }
 
 uintptr_t AdvBoundedTo0Bit(const uintptr_t* bitarr, uintptr_t loc, uintptr_t ceil) {
-  assert(ceil >= 1);
+  // Can overread a single word if loc == ceil.
   const uintptr_t* bitarr_ptr = &(bitarr[loc / kBitsPerWord]);
   uintptr_t ulii = (~(*bitarr_ptr)) >> (loc % kBitsPerWord);
   if (ulii) {
@@ -2087,6 +2086,7 @@ void TransposeBitblock64(const uintptr_t* read_iter, uintptr_t read_ul_stride, u
   // buf0 and buf1 must both be 32KiB vector-aligned buffers when
   // kCacheline==64, and 128KiB when kCacheline==128.
 
+  // todo: better ARM implementation
   const uint32_t buf0_row_ct = DivUp(write_row_ct, 64);
   {
     uintptr_t* buf0_ul = DowncastVecWToW(buf0);
@@ -2937,7 +2937,8 @@ void Reduce8to4bitInplaceUnsafe(uintptr_t entry_ct, uintptr_t* mainvec) {
     vmainvec[write_vidx] = vecw_gather_even(v0, v1, m8);
   }
   uintptr_t write_idx = fullvec_ct * kWordsPerVec;
-  if (write_idx == entry_ct * 2) {
+  // bugfix (9 Jun 2025): mixed up units in this comparison
+  if (write_idx * kBitsPerWordD4 == entry_ct) {
     return;
   }
 #else
@@ -2981,7 +2982,7 @@ uintptr_t FindNth1BitFrom(const uintptr_t* bitvec, uintptr_t cur_pos, uintptr_t 
     uljj = (*bptr) >> ulii;
     ulkk = PopcountWord(uljj);
     if (ulkk >= forward_ct) {
-    JumpForwardSetUnsafe_finish:
+    FindNth1BitFrom_finish:
       return widx * kBitsPerWord + ulii + WordBitIdxToUidx(uljj, forward_ct - 1);
     }
     forward_ct -= ulkk;
@@ -2994,7 +2995,7 @@ uintptr_t FindNth1BitFrom(const uintptr_t* bitvec, uintptr_t cur_pos, uintptr_t 
     uljj = *bptr;
     ulkk = PopcountWord(uljj);
     if (ulkk >= forward_ct) {
-      goto JumpForwardSetUnsafe_finish;
+      goto FindNth1BitFrom_finish;
     }
     forward_ct -= ulkk;
     ++widx;
@@ -3034,7 +3035,7 @@ uintptr_t FindNth1BitFrom(const uintptr_t* bitvec, uintptr_t cur_pos, uintptr_t 
     ulkk = PopcountWord(uljj);
     if (ulkk >= forward_ct) {
       widx = bptr - bitvec;
-      goto JumpForwardSetUnsafe_finish;
+      goto FindNth1BitFrom_finish;
     }
     forward_ct -= ulkk;
   }
