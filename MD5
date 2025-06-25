@@ -1,4 +1,4 @@
-7530dc321ffc3de4f3bfa99b56884fa7 *DESCRIPTION
+cf115f931b0ac7b86d6b3edb4b5e1a2f *DESCRIPTION
 8af7c8403cc92c8253647f1147c31e8b *LICENSE.note
 c53710fe27eed08979c614b4f5773b2e *NAMESPACE
 16eaca5486677fe211199d9f1efd1808 *NEWS.md
@@ -7,8 +7,8 @@ c53467d6c4f3dfdc2477470802ac361d *R/RcppExports.R
 c3ce3b9861d9c4a20f77921f64b60ec9 *README.md
 b52aabe9a2757fc86742763db9dafc9b *build/partial.rdb
 7dd39495e4f1621a23e0de7f2b567139 *cleanup
-4e1ae0f1ac407fec91df3d0d16e0f73a *configure
-cba7e1fd92e67d6c248d44dcef5950a6 *configure.ac
+9a83b248889e0dbbe169a26c429b5796 *configure
+11b4f5ec70676a17293b3d90a2e4875c *configure.ac
 a95479855985b7b380088996761df108 *inst/extdata/chr21_phase3_start.pgen
 1b13baa92c7d956083ced07db1759bc8 *inst/extdata/chr21_phase3_start.psam
 d7781c56ab72f5a1dfa3f65d20875c88 *inst/extdata/chr21_phase3_start.pvar.zst
@@ -21,7 +21,7 @@ d426dff77597df222fd6d335efffbc4d *inst/include/include/pgenlib_misc.cc
 9cd705c49de0c1ff4e232dfe3d53c857 *inst/include/include/pgenlib_read.cc
 a13359b09ca3177fe185dde554bdd6d4 *inst/include/include/pgenlib_read.h
 f1b2cc713d8345d7f7949a682041ef4a *inst/include/include/pgenlib_write.cc
-f6331eb42371db76fb2a7d2874cf60a8 *inst/include/include/pgenlib_write.h
+7ce1067f6c3531ea66b66bd5fbc35aa1 *inst/include/include/pgenlib_write.h
 eb58caaa9bcb88cf46f4f63ca7027693 *inst/include/include/plink2_base.cc
 cd4da08e276bf34dc66d2b5d9f889392 *inst/include/include/plink2_base.h
 03a20328d5fea60c4d892238a975096b *inst/include/include/plink2_bgzf.cc
@@ -516,7 +516,7 @@ b243febb6354688f27f4a2133830bb4d *man/ReadHardcalls.Rd
 674d268770acfb8d768acf8bb0130b78 *man/ReadSparseHardcalls.Rd
 f7c747ca420964bc3545bf413429a81e *man/VariantScores.Rd
 043949a0271e9cd596e3b8419a04e970 *man/pgenlibr-package.Rd
-7a36e7cb361b697e1340bb6636f97738 *src/Makevars.in
+4117964bcd4541fd3ed25c237844f404 *src/Makevars.in
 2cec33791efd347cbcb051402d7cf9c4 *src/Makevars.ucrt
 5093b039166fe137cf2939844df2144d *src/Makevars.win
 4b95e9fc8dc989c3a3ea56a5f52d8bc5 *src/RcppExports.cpp
