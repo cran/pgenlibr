@@ -1,7 +1,7 @@
 #ifndef __PGENLIB_MISC_H__
 #define __PGENLIB_MISC_H__
 
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -443,9 +443,6 @@ HEADER_INLINE void FPutVint64(uint64_t ullii, FILE* ff) {
   putc_unlocked(ullii, ff);
 }
 
-// TODO: make this work properly with kCacheline == 128, then fix other
-// transpose functions, etc.
-
 // main batch size
 CONSTI32(kPglNypTransposeBatch, kNypsPerCacheline);
 
@@ -488,6 +485,11 @@ void BiallelicDosage16Invert(uint32_t dosage_ct, uint16_t* dosage_main);
 
 // replaces each x with -x
 void BiallelicDphase16Invert(uint32_t dphase_ct, int16_t* dphase_delta);
+
+// assumes dosage_ct > 0
+void BiallelicDosage16InvertSubset(const uintptr_t* dosage_present, const uintptr_t* subset, uint32_t dosage_ct, uint16_t* dosage_main_iter);
+
+void BiallelicDphase16InvertSubset(const uintptr_t* dphase_present, const uintptr_t* subset, uint32_t dphase_ct, int16_t* dphase_delta_iter);
 
 void PackWordsToHalfwordsInvmatch(const uintptr_t* __restrict genoarr, uintptr_t inv_match_word, uint32_t inword_ct, uintptr_t* __restrict dst);
 
@@ -652,6 +654,7 @@ HEADER_INLINE uint32_t GenoIter1x(const uintptr_t* __restrict genoarr, uintptr_t
 
 // For every missing entry in genoarr, clear the corresponding subset and
 // sparse_vals entries.
+// 'Unsafe' since they assume 'subset' trailing bits are clear.
 void ClearGenoarrMissing1bit8Unsafe(const uintptr_t* __restrict genoarr, uint32_t* subset_sizep, uintptr_t* __restrict subset, void* __restrict sparse_vals);
 
 void ClearGenoarrMissing1bit16Unsafe(const uintptr_t* __restrict genoarr, uint32_t* subset_sizep, uintptr_t* __restrict subset, void* __restrict sparse_vals);

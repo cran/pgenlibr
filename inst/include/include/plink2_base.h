@@ -1,7 +1,7 @@
 #ifndef __PLINK2_BASE_H__
 #define __PLINK2_BASE_H__
 
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -87,10 +87,14 @@
 #  endif
 #endif
 
-#if (__GNUC__ < 4)
-// may eventually add MSVC support to gain access to MKL on Windows, but can't
+#ifndef __clang__
+#  if (__GNUC__ < 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ < 9))
+// May eventually add MSVC support to gain access to MKL on Windows, but can't
 // justify doing that before all major features are implemented.
-#  error "gcc 4.x+ or clang equivalent required."
+// We're currently building with a version of libdeflate requiring 4.9+; may as
+// well drop the remaining bits of our own code requiring an earlier version.
+#    error "gcc 4.9+ or clang equivalent required."
+#  endif
 #endif
 
 // The -Wshorten-64-to-32 diagnostic forces the code to be cluttered with
@@ -107,7 +111,7 @@
 // 10000 * major + 100 * minor + patch
 // Exception to CONSTI32, since we want the preprocessor to have access
 // to this value.  Named with all caps as a consequence.
-#define PLINK2_BASE_VERNUM 822
+#define PLINK2_BASE_VERNUM 826
 
 // We now try to adhere to include-what-you-use in simple cases.  However,
 // we don't want to repeat either platform-specific ifdefs, or stuff like
@@ -230,6 +234,8 @@ namespace plink2 {
 // RoundUpPow2()...), or (ii) it allows a useful static_assert to be inserted
 // for a hardcoded constant.
 #  if __cplusplus >= 201103L
+#    define HAS_CONSTEXPR
+#    define PREFER_CONSTEXPR constexpr
 #    define HEADER_CINLINE constexpr
 #    define CSINLINE static constexpr
 #    if __cplusplus > 201103L
@@ -240,6 +246,7 @@ namespace plink2 {
 #      define CSINLINE2 static inline
 #    endif
 #  else
+#    define PREFER_CONSTEXPR const
 #    define HEADER_CINLINE inline
 #    define HEADER_CINLINE2 inline
 #    define CSINLINE static inline
@@ -253,25 +260,13 @@ namespace plink2 {
 #    endif
 #  endif
 #else
+#  define PREFER_CONSTEXPR const
 #  define HEADER_INLINE static inline
 #  define HEADER_CINLINE static inline
 #  define HEADER_CINLINE2 static inline
 #  define CSINLINE static inline
 #  define CSINLINE2 static inline
-  // _Static_assert() should work in gcc 4.6+
-#  if (__GNUC__ == 4) && (__GNUC_MINOR__ < 6)
-#    if defined(__clang__) && defined(__has_feature) && defined(__has_extension)
-#      if __has_feature(c_static_assert) || __has_extension(c_static_assert)
-#        define static_assert _Static_assert
-#      else
-#        define static_assert(cond, msg)
-#      endif
-#    else
-#      define static_assert(cond, msg)
-#    endif
-#  else
-#    define static_assert _Static_assert
-#  endif
+#  define static_assert _Static_assert
 #endif
 
 #define __maybe_unused __attribute__((unused))
@@ -635,19 +630,6 @@ HEADER_INLINE uint32_t ctzw(unsigned long ulii) {
 HEADER_INLINE uint32_t bsrw(unsigned long ulii) {
   return (8 * sizeof(intptr_t) - 1) - __builtin_clzl(ulii);
 }
-#  ifndef __LP64__
-    // needed to prevent GCC 6 build failure
-#    if (__GNUC__ == 4) && (__GNUC_MINOR__ < 8)
-#      if (__cplusplus < 201103L) && !defined(__APPLE__)
-#        ifndef uintptr_t
-#          define uintptr_t unsigned long
-#        endif
-#        ifndef intptr_t
-#          define intptr_t long
-#        endif
-#      endif
-#    endif
-#  endif
 #endif
 
 #ifdef __LP64__
@@ -659,16 +641,6 @@ HEADER_INLINE uint32_t bsrw(unsigned long ulii) {
 #  endif
 #  define PRIxPTR2 "016lx"
 #else  // not __LP64__
-
-  // without this, we get ridiculous warning spew...
-  // not 100% sure this is the right cutoff, but this has been tested on 4.7
-  // and 4.8 build machines, so it plausibly is.
-#  if (__GNUC__ == 4) && (__GNUC_MINOR__ < 8) && (__cplusplus < 201103L)
-#    undef PRIuPTR
-#    undef PRIdPTR
-#    define PRIuPTR "lu"
-#    define PRIdPTR "ld"
-#  endif
 
 #  ifdef _WIN32
 #    ifndef PRIuPTR
@@ -2047,6 +2019,9 @@ template <class T, std::size_t N> void STD_ARRAY_FILL0(std::array<T, N>& arr) {
 // this macro ensures that we *only* use it with uint32_t array-references
 #  define STD_ARRAY_REF_FILL0(ct, aref) static_assert(ct * sizeof(aref[0]) == sizeof(aref), "invalid STD_ARRAY_REF_FILL0() invocation"); aref.fill(0)
 
+// reasonable to default to applying one of the following two restrictions to
+// pointer- and flexible-array-member-containing structs, though I haven't done
+// so exhaustively.
 #  define NONCOPYABLE(struct_name) \
   struct_name() = default; \
   struct_name(const struct_name&) = delete; \
@@ -2530,20 +2505,44 @@ extern uint64_t g_failed_alloc_attempt_size;
 // number is printed as well; see e.g.
 //   https://stackoverflow.com/questions/15884793/how-to-get-the-name-or-file-and-line-of-caller-method
 
-#if (((__GNUC__ == 4) && (__GNUC_MINOR__ < 7)) || (__GNUC__ >= 11)) && !defined(__APPLE__)
-// putting this in the header file caused a bunch of gcc 4.4 strict-aliasing
-// warnings, while not doing so seems to inhibit some malloc-related compiler
-// optimizations, bleah
-// compromise: header-inline iff gcc version >= 4.7 (might not be the right
-// cutoff?)
+// Unfortunately, defining the second parameter to be of type void** doesn't do
+// the right thing.
 // update (18 Feb 2022): looks like inlined pgl_malloc is not compiled as
 // intended by gcc 11, due to new ipa-modref pass?  Open to suggestions on how
 // to fix this; maybe it's now necessary to define type-specific malloc
-// wrappers, ugh...
-BoolErr pgl_malloc(uintptr_t size, void* pp);
+// wrappers for clean compilation, ugh...
+// update (22 Nov 2025): now explicitly disabling ipa-modref instead of making
+// this non-inline, since the latter doesn't hold up under LTO.
+#if defined(__cplusplus)
+template <class T> HEADER_INLINE BoolErr pgl_malloc(uintptr_t size, T** pp) {
+  *pp = S_CAST(T*, malloc(size));
+  if (likely(*pp)) {
+    return 0;
+  }
+  g_failed_alloc_attempt_size = size;
+  return 1;
+}
+
+#  if (__GNUC__ >= 11) && !defined(__clang__)
+#    pragma GCC push_options
+#    pragma GCC optimize("-fno-ipa-modref")
+#  endif
+HEADER_INLINE BoolErr pgl_malloc(uintptr_t size, uintptr_t* addr_ptr) {
+  *addr_ptr = R_CAST(uintptr_t, malloc(size));
+  if (likely(*addr_ptr)) {
+    return 0;
+  }
+  g_failed_alloc_attempt_size = size;
+  return 1;
+}
+#  if (__GNUC__ >= 11) && !defined(__clang__)
+#    pragma GCC pop_options
+#  endif
 #else
-// Unfortunately, defining the second parameter to be of type void** doesn't do
-// the right thing.
+#  if (__GNUC__ >= 11) && !defined(__clang__)
+#    pragma GCC push_options
+#    pragma GCC optimize("-fno-ipa-modref")
+#  endif
 HEADER_INLINE BoolErr pgl_malloc(uintptr_t size, void* pp) {
   *S_CAST(unsigned char**, pp) = S_CAST(unsigned char*, malloc(size));
   if (likely(*S_CAST(unsigned char**, pp))) {
@@ -2552,6 +2551,9 @@ HEADER_INLINE BoolErr pgl_malloc(uintptr_t size, void* pp) {
   g_failed_alloc_attempt_size = size;
   return 1;
 }
+#  if (__GNUC__ >= 11) && !defined(__clang__)
+#    pragma GCC pop_options
+#  endif
 #endif
 
 // This must be used for all fwrite() calls where len could be >= 2^31, since
@@ -3281,7 +3283,7 @@ HEADER_INLINE BoolErr vecaligned_malloc(uintptr_t size, void* aligned_pp) {
   return aligned_malloc(size, kBytesPerVec, aligned_pp);
 #else
 #  if defined(__APPLE__) || !defined(__LP64__)
-  const BoolErr ret_boolerr = pgl_malloc(size, aligned_pp);
+  const BoolErr ret_boolerr = pgl_malloc(size, S_CAST(uintptr_t*, aligned_pp));
   assert(IsVecAligned(*S_CAST(uintptr_t**, aligned_pp)));
   return ret_boolerr;
 #  else
@@ -3720,7 +3722,7 @@ HEADER_INLINE char* strcpya(char* __restrict dst, const void* __restrict src) {
   return memcpya(dst, src, slen);
 }
 
-#if defined(__LP64__) && (__cplusplus >= 201103L)
+#if __cplusplus >= 201103L
 constexpr uint32_t CompileTimeSlen(const char* k_str) {
   return k_str[0]? (1 + CompileTimeSlen(&(k_str[1]))) : 0;
 }
@@ -4066,6 +4068,12 @@ HEADER_INLINE void SetAllU32Arr(uintptr_t entry_ct, uint32_t* u32arr) {
     *u32arr++ = ~0U;
   }
 }
+
+uint32_t MaxElementU32(const uint32_t* u32arr, uintptr_t entry_ct);
+
+double MaxElementD(const double* darr, uintptr_t entry_ct);
+
+double MinElementD(const double* darr, uintptr_t entry_ct);
 
 
 // tried _bzhi_u64() in AVX2 case, it was actually worse on my Mac (more

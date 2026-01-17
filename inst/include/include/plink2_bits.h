@@ -1,7 +1,7 @@
 #ifndef __PLINK2_BITS_H__
 #define __PLINK2_BITS_H__
 
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -643,6 +643,14 @@ HEADER_INLINE void AssignNyparrEntry(uint32_t idx, uintptr_t newval, uintptr_t* 
   const uint32_t bit_shift_ct = 2 * (idx % kBitsPerWordD2);
   uintptr_t* wordp = &(nyparr[idx / kBitsPerWordD2]);
   *wordp = ((*wordp) & (~((3 * k1LU) << bit_shift_ct))) | (newval << bit_shift_ct);
+}
+
+// todo: check if compiler is smart enough to optimize out mask in
+// AssignNyparrEntry(idx, 3, nyparr)
+HEADER_INLINE void SetNyparrEntryTo3(uint32_t idx, uintptr_t* nyparr) {
+  const uint32_t bit_shift_ct = 2 * (idx % kBitsPerWordD2);
+  uintptr_t* wordp = &(nyparr[idx / kBitsPerWordD2]);
+  *wordp = (*wordp) | ((3 * k1LU) << bit_shift_ct);
 }
 
 HEADER_INLINE void ClearNyparrEntry(uint32_t idx, uintptr_t* nyparr) {

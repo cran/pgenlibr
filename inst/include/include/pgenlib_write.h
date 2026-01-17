@@ -1,7 +1,7 @@
 #ifndef __PGENLIB_WRITE_H__
 #define __PGENLIB_WRITE_H__
 
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -355,6 +355,7 @@ HEADER_INLINE PglErr SpgwAppendBiallelicGenovecHphaseDosage16(const uintptr_t* _
 
 // dosage_present cannot be null for nonzero dosage_ct
 // trailing bits of dosage_present MUST be zeroed out
+// dphase_present must be a subset of dosage_present
 // could make dosage_main[] has length dosage_ct + dphase_ct instead of having
 // separate dphase_delta[]?
 BoolErr PwcAppendBiallelicGenovecDphase16(const uintptr_t* __restrict genovec, const uintptr_t* __restrict phasepresent, const uintptr_t* __restrict phaseinfo, const uintptr_t* __restrict dosage_present, const uintptr_t* __restrict dphase_present, const uint16_t* dosage_main, const int16_t* dphase_delta, uint32_t dosage_ct, uint32_t dphase_ct, PgenWriterCommon* pwcp);
@@ -371,6 +372,7 @@ HEADER_INLINE PglErr SpgwAppendBiallelicGenovecDphase16(const uintptr_t* __restr
 }
 
 // Writes footer if present, backfills header, then closes the file.
+// Currently assumes variant_ct > 0.
 PglErr SpgwFinish(STPgenWriter* spgwp);
 
 // Last flush automatically writes footer if present, backfills header, and

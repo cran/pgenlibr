@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -17,16 +17,17 @@
 
 #include "plink2_thread.h"
 
-#ifndef _WIN32
-#  ifdef __APPLE__
-#    include <unistd.h>  // sysconf()
-#  else
-#    ifndef _GNU_SOURCE
-#      define _GNU_SOURCE
-#    endif
-#    include <sched.h>  // sched_getaffinity(), CPU_COUNT()
+#if !defined(_WIN32) && !defined(__APPLE__)
+#  ifndef _GNU_SOURCE
+#    define _GNU_SOURCE
 #  endif
+#  include <sched.h>  // sched_getaffinity(), CPU_COUNT()
 #endif
+#include <stdlib.h>
+#ifdef __APPLE__
+#  include <unistd.h>  // sysconf()
+#endif
+
 
 #ifdef __cplusplus
 namespace plink2 {

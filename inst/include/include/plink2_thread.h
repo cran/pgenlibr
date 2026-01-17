@@ -1,7 +1,7 @@
 #ifndef __PLINK2_THREAD_H__
 #define __PLINK2_THREAD_H__
 
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -70,40 +70,8 @@
 #  define THREAD_RETURN return nullptr
 #endif
 
-#if (__GNUC__ == 4) && (__GNUC_MINOR__ < 7) && !defined(__clang__)
-// todo: check if this is also needed for any clang versions we care about.
-// (support was added in clang 3.1, I think?)
-#  define __ATOMIC_RELAXED 0
-#  define __ATOMIC_CONSUME 1
-#  define __ATOMIC_ACQUIRE 2
-#  define __ATOMIC_RELEASE 3
-#  define __ATOMIC_ACQ_REL 4
-#  define __ATOMIC_SEQ_CST 5
-#  define __atomic_fetch_add(ptr, val, memorder) __sync_fetch_and_add((ptr), (val))
-#  define __atomic_fetch_sub(ptr, val, memorder) __sync_fetch_and_sub((ptr), (val))
-#  define __atomic_sub_fetch(ptr, val, memorder) __sync_sub_and_fetch((ptr), (val))
-
-HEADER_INLINE uint32_t ATOMIC_COMPARE_EXCHANGE_N_U32(uint32_t* ptr, uint32_t* expected, uint32_t desired, __maybe_unused int weak, __maybe_unused int success_memorder, __maybe_unused int failure_memorder) {
-  const uint32_t new_expected = __sync_val_compare_and_swap(ptr, *expected, desired);
-  if (new_expected == (*expected)) {
-    return 1;
-  }
-  *expected = new_expected;
-  return 0;
-}
-
-HEADER_INLINE uint32_t ATOMIC_COMPARE_EXCHANGE_N_U64(uint64_t* ptr, uint64_t* expected, uint64_t desired, __maybe_unused int weak, __maybe_unused int success_memorder, __maybe_unused int failure_memorder) {
-  const uint64_t new_expected = __sync_val_compare_and_swap(ptr, *expected, desired);
-  if (new_expected == (*expected)) {
-    return 1;
-  }
-  *expected = new_expected;
-  return 0;
-}
-#else
-#  define ATOMIC_COMPARE_EXCHANGE_N_U32 __atomic_compare_exchange_n
-#  define ATOMIC_COMPARE_EXCHANGE_N_U64 __atomic_compare_exchange_n
-#endif
+#define ATOMIC_COMPARE_EXCHANGE_N_U32 __atomic_compare_exchange_n
+#define ATOMIC_COMPARE_EXCHANGE_N_U64 __atomic_compare_exchange_n
 
 #ifdef __cplusplus
 namespace plink2 {
@@ -302,7 +270,7 @@ BoolErr THREAD_BLOCK_FINISH(ThreadGroupFuncArg* tgfap);
 
 // Convenience functions for potentially-small-and-frequent jobs where
 // thread_ct == 0 corresponds to not wanting to launch threads at all; see
-// MakeDupflagHtable in plink2_cmdline for a typical use case.
+// MakeDupflagHtable in plink2_htable.cc for a typical use case.
 HEADER_INLINE BoolErr SetThreadCt0(uint32_t thread_ct, ThreadGroup* tg_ptr) {
   if (!thread_ct) {
     return 0;

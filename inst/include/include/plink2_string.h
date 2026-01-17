@@ -1,7 +1,7 @@
 #ifndef __PLINK2_STRING_H__
 #define __PLINK2_STRING_H__
 
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -146,52 +146,28 @@ HEADER_INLINE char* DowncastToXC(const void* pp) {
 }
 #endif
 
-#ifdef _GNU_SOURCE
-// There was some recent (2016) discussion on the gcc mailing list on strlen()
-// vs. rawmemchr(., 0), where it was claimed that rawmemchr(., 0) could be
-// compiled to something slower than &(.[strlen(.)]), rather than being at
-// least as good.  However, this didn't happen when I tried to benchmark this,
-// so I'll stick to the function that returns the right type (except when
-// rawmemchr itself has to be emulated).
-HEADER_INLINE CXXCONST_CP strnul(const char* str) {
-  return S_CAST(CXXCONST_CP, rawmemchr(str, 0));
-}
-
-#  ifdef __cplusplus
-HEADER_INLINE char* strnul(char* str) {
-  return const_cast<char*>(strnul(const_cast<const char*>(str)));
-}
-#  endif
-
-#else  // !_GNU_SOURCE
-
-#  ifdef __LP64__
-CXXCONST_VOIDP rawmemchr(const void* ss, int cc);
+// rawmemchr() is deprecated in glibc and absent from musl.
+#ifdef __LP64__
+CXXCONST_VOIDP Rawmemchr(const void* ss, int cc);
 
 HEADER_INLINE CXXCONST_CP strnul(const char* str) {
-  return S_CAST(CXXCONST_CP, rawmemchr(str, 0));
+  return S_CAST(CXXCONST_CP, Rawmemchr(str, 0));
 }
-#  else  // !_GNU_SOURCE, !__LP64__
-HEADER_INLINE CXXCONST_VOIDP rawmemchr(const void* ss, int cc) {
+#else
+HEADER_INLINE CXXCONST_VOIDP Rawmemchr(const void* ss, int cc) {
   return S_CAST(CXXCONST_VOIDP, memchr(ss, cc, 0x80000000U - kBytesPerVec));
 }
+#endif
 
-HEADER_INLINE CXXCONST_CP strnul(const char* str) {
-  return S_CAST(CXXCONST_CP, &(str[strlen(str)]));
-}
-#  endif
-
-#  ifdef __cplusplus
-HEADER_INLINE void* rawmemchr(void* ss, int cc) {
-  return const_cast<void*>(rawmemchr(const_cast<const void*>(ss), cc));
+#ifdef __cplusplus
+HEADER_INLINE void* Rawmemchr(void* ss, int cc) {
+  return const_cast<void*>(Rawmemchr(const_cast<const void*>(ss), cc));
 }
 
 HEADER_INLINE char* strnul(char* str) {
   return const_cast<char*>(strnul(const_cast<const char*>(str)));
 }
-#  endif
-
-#endif  // !_GNU_SOURCE
+#endif
 
 // See also AdvToDelimOrEnd later below, which is an obvious alternative memchr
 // interface.
@@ -1115,7 +1091,7 @@ HEADER_INLINE uintptr_t strlen_se(const char* ss) {
 
 // just an alias for rawmemchr which doesn't require a subsequent static-cast.
 HEADER_INLINE CXXCONST_CP AdvToDelim(const char* str_iter, char delim) {
-  return S_CAST(CXXCONST_CP, rawmemchr(str_iter, delim));
+  return S_CAST(CXXCONST_CP, Rawmemchr(str_iter, delim));
 }
 
 #ifdef __cplusplus
@@ -1655,6 +1631,8 @@ int32_t bsearch_strptr_natural(const char* idbuf, const char* const* sorted_strp
 
 // returns number of elements in sorted_strbox[] less than idbuf.
 uintptr_t bsearch_strbox_lb(const char* idbuf, const char* sorted_strbox, uintptr_t cur_id_slen, uintptr_t max_id_blen, uintptr_t end_idx);
+
+uintptr_t bsearch_strbox_lb_natural(const char* idbuf, const char* sorted_strbox, uintptr_t cur_id_slen, uintptr_t max_id_blen, uintptr_t end_idx);
 
 // same result as bsearch_strbox_lb(), but checks against [cur_idx],
 // [cur_idx + 1], [cur_idx + 3], [cur_idx + 7], etc. before finishing with a

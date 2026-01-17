@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -29,17 +29,6 @@ const char kErrstrWrite[] = "Error: File write failure: %s.\n";
 const char kErrprintfDecompress[] = "Error: %s decompression failure: %s.\n";
 
 uint64_t g_failed_alloc_attempt_size = 0;
-
-#if (((__GNUC__ == 4) && (__GNUC_MINOR__ < 7)) || (__GNUC__ >= 11)) && !defined(__APPLE__)
-BoolErr pgl_malloc(uintptr_t size, void* pp) {
-  *S_CAST(unsigned char**, pp) = S_CAST(unsigned char*, malloc(size));
-  if (likely(*S_CAST(unsigned char**, pp))) {
-    return 0;
-  }
-  g_failed_alloc_attempt_size = size;
-  return 1;
-}
-#endif
 
 BoolErr fwrite_checked(const void* buf, uintptr_t len, FILE* outfile) {
   while (len > kMaxBytesPerIO) {
@@ -611,6 +600,43 @@ char* i64toa(int64_t llii, char* start) {
   return uitoa_z8(bottom_eight, start);
 }
 
+uint32_t MaxElementU32(const uint32_t* u32arr, uintptr_t entry_ct) {
+  // confirmed that *std::max_element() has horrible performance on at least
+  // macOS
+  // also confirmed that macOS compiler autovectorizes this; main loop
+  // processes 4 vectors at a time
+  uint32_t result = u32arr[0];
+  for (uintptr_t entry_idx = 1; entry_idx != entry_ct; ++entry_idx) {
+    const uint32_t cur_element = u32arr[entry_idx];
+    if (cur_element > result) {
+      result = cur_element;
+    }
+  }
+  return result;
+}
+
+double MaxElementD(const double* darr, uintptr_t entry_ct) {
+  double result = darr[0];
+  for (uintptr_t entry_idx = 1; entry_idx != entry_ct; ++entry_idx) {
+    const double cur_element = darr[entry_idx];
+    if (cur_element > result) {
+      result = cur_element;
+    }
+  }
+  return result;
+}
+
+double MinElementD(const double* darr, uintptr_t entry_ct) {
+  double result = darr[0];
+  for (uintptr_t entry_idx = 1; entry_idx != entry_ct; ++entry_idx) {
+    const double cur_element = darr[entry_idx];
+    if (cur_element < result) {
+      result = cur_element;
+    }
+  }
+  return result;
+}
+
 #if defined(USE_SSE2) && !defined(NO_UNALIGNED)
 uintptr_t FirstUnequal4(const void* arr1, const void* arr2, uintptr_t nbytes) {
   // Similar to memequal().
@@ -658,7 +684,7 @@ uintptr_t FirstUnequal4(const void* arr1, const void* arr2, uintptr_t nbytes) {
     const VecUc v1 = vecuc_loadu(&(arr1_alias[vidx]));
     const VecUc v2 = vecuc_loadu(&(arr2_alias[vidx]));
 #  ifndef SIMDE_ARM_NEON_A32V8_NATIVE
-    const uint32_t eq_result = vecw_movemask(v1 == v2);
+    const uint32_t eq_result = vecuc_movemask(v1 == v2);
     if (eq_result != kVec8thUintMax) {
       return vidx * kBytesPerVec + ctzu32(~eq_result);
     }
@@ -673,10 +699,12 @@ uintptr_t FirstUnequal4(const void* arr1, const void* arr2, uintptr_t nbytes) {
     const uintptr_t final_offset = nbytes - kBytesPerVec;
     const char* s1 = S_CAST(const char*, arr1);
     const char* s2 = S_CAST(const char*, arr2);
-    const VecW v1 = vecw_loadu(&(s1[final_offset]));
-    const VecW v2 = vecw_loadu(&(s2[final_offset]));
+    // bugfix (5 Jul 2025): this must be VecUc on ARM, not VecW
+    // (disturbing that arm_shrn4_uc() call compiled at all...)
+    const VecUc v1 = vecuc_loadu(&(s1[final_offset]));
+    const VecUc v2 = vecuc_loadu(&(s2[final_offset]));
 #  ifndef SIMDE_ARM_NEON_A32V8_NATIVE
-    const uint32_t eq_result = vecw_movemask(v1 == v2);
+    const uint32_t eq_result = vecuc_movemask(v1 == v2);
     if (eq_result != kVec8thUintMax) {
       return final_offset + ctzu32(~eq_result);
     }

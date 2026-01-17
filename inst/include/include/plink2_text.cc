@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -98,14 +98,15 @@ BoolErr GzRawInit(const void* buf, uint32_t nbytes, GzRawDecompressStream* gzp) 
   dsp->zalloc = nullptr;
   dsp->zfree = nullptr;
   dsp->opaque = nullptr;
-#if defined(__clang__) || (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 6))
+  // This is one way to disable the pragma for CRAN.
+#ifndef PGENLIB_NOPRINT
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wold-style-cast"
 #endif
   if (unlikely(inflateInit2(dsp, MAX_WBITS | 16) != Z_OK)) {
     return 1;
   }
-#if defined(__clang__) || (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 6))
+#ifndef PGENLIB_NOPRINT
 #  pragma GCC diagnostic pop
 #endif
   gzp->ds_initialized = 1;
@@ -1025,7 +1026,7 @@ THREAD_FUNC_DECL TextStreamThread(void* raw_arg) {
         char* final_read_head = cur_read_end;
         if (cur_block_start != final_read_head) {
           if (final_read_head[-1] != '\n') {
-            // Append '\n' so consumer can always use rawmemchr(., '\n') to
+            // Append '\n' so consumer can always use Rawmemchr(., '\n') to
             // find the end of the current line.
             *final_read_head++ = '\n';
           }
@@ -1611,7 +1612,6 @@ PglErr TextAdvance(TextStream* txs_ptr) {
       }
       // pthread_cond_signal(consumer_progress_condvarp);
       pthread_mutex_unlock(sync_mutexp);
-      // printf("consuming %lx..%lx\n", (uintptr_t)(*consume_iterp), (uintptr_t)rlsp->consume_stop);
       return kPglRetSuccess;
     }
     // We've processed all the consume-ready bytes...

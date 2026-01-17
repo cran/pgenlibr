@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -24,8 +24,8 @@
 namespace plink2 {
 #endif
 
-#if defined(__LP64__) && !defined(_GNU_SOURCE)
-CXXCONST_VOIDP rawmemchr(const void* ss, int cc) {
+#ifdef __LP64__
+CXXCONST_VOIDP Rawmemchr(const void* ss, int cc) {
   const uintptr_t starting_addr = R_CAST(uintptr_t, ss);
   const VecI8* ss_viter = R_CAST(const VecI8*, RoundDownPow2(starting_addr, kBytesPerVec));
   const VecI8 vvec_all_needle = veci8_set1(cc);
@@ -3045,6 +3045,22 @@ uintptr_t bsearch_strbox_lb(const char* idbuf, const char* sorted_strbox, uintpt
   return start_idx;
 }
 
+uintptr_t bsearch_strbox_lb_natural(const char* idbuf, const char* nsorted_strbox, uintptr_t cur_id_slen, uintptr_t max_id_blen, uintptr_t end_idx) {
+  if (cur_id_slen > max_id_blen) {
+    cur_id_slen = max_id_blen;
+  }
+  uintptr_t start_idx = 0;
+  while (start_idx < end_idx) {
+    const uintptr_t mid_idx = (start_idx + end_idx) / 2;
+    if (strcmp_natural(idbuf, &(nsorted_strbox[mid_idx * max_id_blen])) > 0) {
+      start_idx = mid_idx + 1;
+    } else {
+      end_idx = mid_idx;
+    }
+  }
+  return start_idx;
+}
+
 uintptr_t ExpsearchStrLb(const char* idbuf, const char* sorted_strbox, uintptr_t cur_id_slen, uintptr_t max_id_blen, uintptr_t end_idx, uintptr_t cur_idx) {
   uintptr_t next_incr = 1;
   uintptr_t start_idx = cur_idx;
@@ -3294,7 +3310,8 @@ CXXCONST_CP LastSpaceOrEoln(const char* str_start, uintptr_t slen) {
     const VecUc pre33_vvec0 = vecuc_signed_cmpgt(vecuc_add(*str_rev_viter, vvec_all95), vvec_all94);
     const uint64_t nontoken_nybbles = arm_shrn4_uc(pre33_vvec1 | pre33_vvec0);
     if (nontoken_nybbles) {
-      const uint32_t nontoken_nybbles1 = arm_shrn4_uc(pre33_vvec1);
+      // bugfix (15 Sep 2025)
+      const uint64_t nontoken_nybbles1 = arm_shrn4_uc(pre33_vvec1);
       if (nontoken_nybbles1) {
         const uint32_t byte_offset_in_vec = bsrw(nontoken_nybbles1) / 4;
         return &(DowncastToXC(&(str_rev_viter[1]))[byte_offset_in_vec]);

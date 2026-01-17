@@ -1,4 +1,4 @@
-// This library is part of PLINK 2.0, copyright (C) 2005-2025 Shaun Purcell,
+// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
 // Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
@@ -353,7 +353,7 @@ PglErr LoadMinimalPvarEx(const char* fname, LoadMinimalPvarFlags flags, MinimalP
       assert(!mpp->chr_idxs);
       mpp->chr_idxs = chr_idxs;
     }
-    int32_t* variant_bps;
+    int32_t* variant_bps = nullptr;  // spurious gcc warning
     if (pos_needed) {
       assert(!mpp->variant_bps);
       variant_bps = S_CAST(int32_t*, malloc(variant_ct * sizeof(int32_t)));
