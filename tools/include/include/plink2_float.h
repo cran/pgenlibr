@@ -28,6 +28,9 @@
 #ifndef DBL_MAX
 #  define DBL_MAX 1.7976931348623157e308
 #endif
+#ifndef DBL_MIN
+#  define DBL_MIN 2.2250738585072014e-308
+#endif
 #ifndef FLT_MAX
 #  define FLT_MAX S_CAST(float, 3.40282347e38)
 #endif
@@ -44,14 +47,15 @@ static const double INFINITY_D = S_CAST(double, INFINITY);
 // Notes on float64 ('double') precision:
 // * 1 + 2^{-52} is the smallest float64 greater than 1, and 1 - 2^{-53} is the
 //   largest float64 less than 1.  Since plink2 flushes denormals to zero on
-//   the main target platforms (remaining todo: implement for Linux ARM), a
-//   'ULP' ("unit in the last place") can be assumed to be between 2^{-52} and
-//   2^{-53} times the total value.
+//   the main target platforms, a 'ULP' ("unit in the last place") can be
+//   assumed to be between 2^{-52} and 2^{-53} times the total value.
 //   When manually updating an epsilon value that's ever added to 1, multiples
 //   of 2^{-52} should be used.  If epsilon is only ever subtracted from 1, it
 //   is ok to use multiples of 2^{-53}.
 // * With default rounding behavior, the maximum rounding error from a basic
 //   arithmetic operation is 0.5 ULP, i.e. ~2^{-53} times the result.
+//   plink2 functions are written to assume default rounding, and to avoid
+//   assumptions about denormal handling.
 // * Unfortunately, accuracy of functions like exp and log is currently
 //   platform-dependent, and it isn't realistically worthwhile to purge that
 //   source of platform variation when we're continuing to use different linear
@@ -77,6 +81,7 @@ static const double k2m32 = 1.0 / (1LL << 32);
 static const double k2m50 = 1.0 / (1LL << 50);
 static const double k2m52 = 1.0 / (1LL << 52);
 static const double k2m53 = 1.0 / (1LL << 53);
+static const double k2m54 = 1.0 / (1LL << 54);
 static const double k2p50 = 1.0 * (1LL << 50);
 static const double k2p64 = 4.0 * (1LL << 62);
 static const double k2p100 = k2p50 * k2p50;
@@ -101,6 +106,7 @@ static const double k2m30 = 1.0 / (1 << 30);
 static const double k2m35 = 1.0 / (1LL << 35);
 static const double k2m44 = 1.0 / (1LL << 44);
 static const double k2m60 = 1.0 / (1LL << 60);
+static const double k2m64 = k2m60 / 16;
 
 static const double kBigEpsilon = k2m21;  // must be >= sqrt(kSmallEpsilon)
 static const double kEpsilon = k2m30;
@@ -203,6 +209,76 @@ HEADER_INLINE float prefer_fmaf(float a, float b, float c) {
   return a * b + c;
 }
 #endif
+
+HEADER_INLINE uint64_t float64bits(double xx) {
+  double* xx_ptr = &xx;
+  return *R_CAST(uint64_t*, xx_ptr);
+}
+
+HEADER_INLINE double float64frombits(uint64_t ullii) {
+  uint64_t* ullii_ptr = &ullii;
+  return *R_CAST(double*, ullii_ptr);
+}
+
+HEADER_INLINE double prev_float64(double xx) {
+  return float64frombits(float64bits(xx) - 1);
+}
+
+HEADER_INLINE double next_float64(double xx) {
+  return float64frombits(float64bits(xx) + 1);
+}
+
+// Returns log(exp(xx) + exp(yy)).
+HEADER_INLINE double lnsum(double xx, double yy) {
+  // log(exp(xx) + exp(yy))
+  // = log(exp(max(xx,yy)) * (1 + exp(min(xx,yy) - max(xx,yy))))
+  // = max(xx,yy) + log(1 + exp(min(xx,yy) - max(xx,yy)))
+  // If max(xx,yy) >> min(xx,yy), quickly return max(xx,yy).
+  // If xx and yy are close enough to each other that exp(min(xx,yy) -
+  // max(xx,yy)) rounds to 1, nothing bad happens; we can focus on maximizing
+  // accuracy in the exp(min(xx,yy) - max(xx,yy)) near zero case.
+  const double max_arg = MAXV(xx, yy);
+  const double ln_ratio = MINV(xx, yy) - max_arg;
+  if (ln_ratio < -54 * kLn2) {
+    return max_arg;
+  }
+  return max_arg + log1p(exp(ln_ratio));
+}
+
+// Returns log(exp(xx) - exp(yy)), assuming xx > yy.
+HEADER_INLINE double lndiff(double xx, double yy) {
+  // log(exp(xx) - exp(yy))
+  // = log(exp(xx) * (1 - exp(yy-xx)))
+  // = xx + log(1 - exp(yy-xx))
+  // Subcases of interest:
+  // * xx >> yy: exp(yy-xx) indistinguishable from zero, quickly return xx.
+  // * (yy-xx) very small: if exp(yy-xx) rounds to 1, we have a problem.
+  //   xx + log(-expm1(yy-xx)) avoids the problem.
+  const double ln_ratio = yy - xx;
+  if (ln_ratio < -54 * kLn2) {
+    // yy is too small to matter.
+    return xx;
+  }
+  return xx + log(-expm1(ln_ratio));
+}
+
+HEADER_INLINE double ceil_limit(double xx, double limit) {
+  if (xx >= limit) {
+    return limit;
+  }
+  return ceil(xx);
+}
+
+HEADER_INLINE double flush_if_denormal(double xx) {
+  if (fabs(xx) < DBL_MIN) {
+    return 0.0;
+  }
+  return xx;
+}
+
+HEADER_INLINE double exp_flush(double xx) {
+  return flush_if_denormal(exp(xx));
+}
 
 #ifdef __cplusplus
 }  // namespace plink2
