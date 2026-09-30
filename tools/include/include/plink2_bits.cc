@@ -1,5 +1,5 @@
-// This library is part of PLINK 2, copyright (C) 2005-2024 Shaun Purcell,
-// Christopher Chang.
+// This library is part of PLINK 2, copyright (C) 2005-2026 Shaun Purcell,
+// Christopher Chang, Benjamin Demaille.
 //
 // This library is free software: you can redistribute it and/or modify it
 // under the terms of the GNU Lesser General Public License as published by the
